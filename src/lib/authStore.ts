@@ -362,7 +362,8 @@ export async function apiUpdatePaymentConfig(config: any): Promise<{ success: bo
       if (res.status === 413) {
         return { success: false, message: '上传的图片尺寸过大，请压缩后重试 (不得超过 50MB)' };
       }
-      return { success: false, message: `服务器错误 (${res.status}): 更新失败` };
+      const preview = text ? text.substring(0, 30).replace(/\n/g, ' ') : 'empty';
+      return { success: false, message: `服务器错误 (${res.status}): 更新失败 [${preview}]` };
     }
   } catch (err: any) {
     return { success: false, message: '更新收款配置失败: 网络异常' };

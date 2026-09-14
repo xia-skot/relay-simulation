@@ -853,7 +853,15 @@ app.post('/api/payment/config', async (req, res) => {
       );
     } catch {}
 
-    res.json({ success: true, message: '收款配置已更新并实时生效', config: updated });
+    res.json({ 
+      success: true, 
+      message: '收款配置已更新并实时生效', 
+      config: {
+        ...updated,
+        wechatQr: updated.wechatQr ? 'saved' : '',
+        alipayQr: updated.alipayQr ? 'saved' : ''
+      } 
+    });
   } catch (err: any) {
     console.error('Update payment config error:', err);
     res.status(500).json({ success: false, message: '更新收款配置失败' });
