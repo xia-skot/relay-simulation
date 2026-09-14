@@ -1,8 +1,8 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { MongoClient, ObjectId } from 'mongodb';
 import nodemailer from 'nodemailer';
-import { createServer as createViteServer } from 'vite';
 
 const PORT = 3000;
 const app = express();
@@ -16,10 +16,17 @@ const DB_NAME = 'relay_platform';
 let dbClient: MongoClient | null = null;
 async function getDb() {
   if (!dbClient) {
-    dbClient = new MongoClient(MONGODB_URI, {
+    const client = new MongoClient(MONGODB_URI, {
       serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000,
     });
-    await dbClient.connect();
+    try {
+      await client.connect();
+      dbClient = client;
+    } catch (err) {
+      dbClient = null;
+      throw err;
+    }
   }
   return dbClient.db(DB_NAME);
 }
@@ -961,16 +968,20 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 });
 
-// ======================== VITE MIDDLEWARE ========================
+// ======================== VITE MIDDLEWARE & STATIC SERVER ========================
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+  const isDev = process.env.DEV === 'true' || (process.env.NODE_ENV === 'development' && !hasDist);
+
+  if (isDev) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -978,7 +989,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT} [mode: ${isDev ? 'development' : 'production'}]`);
   });
 }
 
