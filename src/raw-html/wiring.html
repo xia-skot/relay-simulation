@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电流保护接线方式演示系统 (亮色版)</title>
+    <style>
+        :root {
+            /* 亮色主题变量 */
+            --bg-dark: #f8fafc; /* 主背景 slate-50 */
+            --panel-bg: #ffffff; /* 面板背景 white */
+            --text-main: #0f172a; /* 主文本 slate-900 */
+            --text-muted: #64748b; /* 次文本 slate-500 */
+            --teal: #0d9488; /* 主题色 teal-600 */
+            --teal-glow: rgba(13, 148, 136, 0.2);
+            --red: #ef4444;
+            --amber: #f59e0b;
+            --green: #10b981;
+            --border: #e2e8f0; /* 边框 slate-200 */
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-width: 768px) {
+            body { flex-direction: row; }
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 100%;
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            z-index: 20;
+            box-shadow: 4px 0 15px rgba(0,0,0,0.05);
+            flex-shrink: 0;
+        }
+
+        @media (min-width: 768px) {
+            .sidebar { width: 320px; height: 100%; }
+        }
+
+        .header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .title {
+            font-size: 1.25rem;
+            font-weight: bold;
+            background: linear-gradient(to right, #0d9488, #0891b2);
+            -webkit-background-clip: text;
+            color: transparent;
+            margin-bottom: 0.25rem;
+        }
+
+        .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .controls {
+            padding: 1.5rem;
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.75rem;
+        }
+
+        /* 按钮样式 */
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            background: #f1f5f9;
+            padding: 0.25rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .btn {
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+        }
+
+        .btn:hover {
+            color: var(--text-main);
+            background: #e2e8f0;
+        }
+
+        .btn.active {
+            background: linear-gradient(135deg, #14b8a6, #0d9488);
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(20, 184, 166, 0.2);
+        }
+
+        .radio-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .radio-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #ffffff;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .radio-item:hover {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+        }
+
+        .radio-item.active {
+            background: #f0fdfa;
+            border-color: #0d9488;
+            color: #115e59;
+            box-shadow: 0 0 15px rgba(13, 148, 136, 0.1);
+        }
+
+        .indicator {
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 50%;
+            background: #cbd5e1;
+            transition: all 0.3s;
+        }
+
+        .radio-item.active .indicator {
+            background: #14b8a6;
+            box-shadow: 0 0 8px rgba(20, 184, 166, 0.5);
+        }
+
+        .info-box {
+            margin-top: auto;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-size: 0.75rem;
+            color: #1e3a8a;
+            line-height: 1.5;
+        }
+        
+        .author-box {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+            text-align: center;
+        }
+        
+        .author-box strong {
+            color: #334155;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        /* 主区域 */
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background: var(--bg-dark);
+            overflow: hidden;
+        }
+
+        /* 图表容器 */
+        .diagram-container {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            background: radial-gradient(ellipse at center, #f1f5f9 0%, #f8fafc 70%);
+        }
+
+        svg {
+            width: 100%;
+            height: 100%; 
+            max-height: 90vh;
+            filter: drop-shadow(0 0 10px rgba(0,0,0,0.05));
+        }
+
+        /* 底部面板 */
+        .bottom-panel {
+            height: 160px;
+            background: var(--panel-bg);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            z-index: 30;
+            box-shadow: 0 -5px 20px rgba(0,0,0,0.05);
+        }
+
+        @media (min-width: 768px) {
+            .bottom-panel { flex-direction: row; }
+        }
+
+        .status-section {
+            width: 100%;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: #f8fafc;
+        }
+
+        @media (min-width: 768px) {
+            .status-section {
+                width: 260px;
+                border-bottom: none;
+                border-right: 1px solid var(--border);
+            }
+        }
+
+        .status-icon-box {
+            width: 3.5rem;
+            height: 3.5rem;
+            border-radius: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid;
+            font-size: 1.5rem;
+            transition: all 0.5s;
+        }
+
+        .explanation-section {
+            flex: 1;
+            padding: 1.25rem;
+            overflow-y: auto;
+        }
+
+        .explanation-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: var(--teal);
+            text-transform: uppercase;
+            margin-bottom: 0.5rem;
+        }
+
+        .explanation-text {
+            font-size: 0.875rem;
+            color: #334155;
+            line-height: 1.6;
+            white-space: pre-line;
+        }
+
+        .data-section {
+            width: 100%;
+            padding: 1.25rem;
+            background: #f8fafc;
+            border-top: 1px solid var(--border);
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            font-size: 0.75rem;
+        }
+
+        @media (min-width: 768px) {
+            .data-section {
+                width: 320px;
+                border-top: none;
+                border-left: 1px solid var(--border);
+            }
+        }
+
+        .data-col-header {
+            color: var(--text-muted);
+            font-weight: bold;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+            align-items: center;
+        }
+
+        .tag {
+            padding: 0.125rem 0.375rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+        }
+
+        .anim-pulse {
+            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        .cursor-pointer { cursor: pointer; }
+        .hover-glow:hover { filter: drop-shadow(0 0 5px rgba(0,0,0,0.2)); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+
+        /* 图例 */
+        .legend {
+            position: absolute;
+            top: 1.5rem;
+            right: 1.5rem;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border);
+            padding: 1rem;
+            border-radius: 0.75rem;
+            z-index: 10;
+        }
+        
+        .legend-title {
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 0.75rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: #334155;
+            margin-bottom: 0.5rem;
+        }
+        
+        .legend-color { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+
+        /* 全屏报警闪烁 */
+        .alarm-overlay {
+            position: absolute;
+            inset: 0;
+            border: 4px solid rgba(239, 68, 68, 0.3);
+            border-radius: 0.75rem;
+            pointer-events: none;
+            animation: pulse 1s infinite;
+            display: none;
+            z-index: 50;
+        }
+        .alarm-overlay.active { display: block; }
+
+    </style>
+</head>
+<body>
+
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+        <div class="header">
+            <h1 class="title">电流保护接线方式</h1>
+            <p class="subtitle">演示模型 • 异地两相接地短路</p>
+        </div>
+
+        <div class="controls">
+            <!-- 拓扑选择 -->
+            <div class="control-group">
+                <label>线路结构</label>
+                <div class="btn-group">
+                    <button class="btn active" id="btn-series" onclick="setTopology('Series')">串联线路</button>
+                    <button class="btn" id="btn-parallel" onclick="setTopology('Parallel')">并联线路</button>
+                </div>
+            </div>
+
+            <!-- 接线选择 -->
+            <div class="control-group">
+                <label>接线方式</label>
+                <div class="radio-list">
+                    <div class="radio-item active" id="radio-3ph" onclick="setWiringMode('ThreePhaseStar')">
+                        <span>三相星形 (A, B, C)</span>
+                        <div class="indicator"></div>
+                    </div>
+                    <div class="radio-item" id="radio-2ph" onclick="setWiringMode('TwoPhaseStar')">
+                        <span>两相星形 (A, C)</span>
+                        <div class="indicator"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 信息提示 -->
+            <div class="info-box">
+                <div style="margin-bottom: 0.5rem; font-weight: bold; color: #1d4ed8;">操作指南</div>
+                点击右侧图中的虚线圈 <span style="background: #dbeafe; padding: 0 4px; border-radius: 2px; font-family: monospace; color: #1e40af;">k1</span> 或 <span style="background: #dbeafe; padding: 0 4px; border-radius: 2px; font-family: monospace; color: #1e40af;">k2</span> 来设置故障点位置。
+            </div>
+        </div>
+
+        <div class="author-box">
+            <strong style="font-family: monospace;"></strong>
+            <span style="font-family: monospace;"></span>
+        </div>
+    </aside>
+
+    <!-- 主界面 -->
+    <main class="main-area">
+        <div class="diagram-container" id="diagram-container">
+            <!-- SVG 将通过 JS 注入这里 -->
+            <div class="legend">
+                <div class="legend-title">图例说明</div>
+                <div class="legend-item"><div class="legend-color" style="background: #f59e0b;"></div> A 相</div>
+                <div class="legend-item"><div class="legend-color" style="background: #10b981;"></div> B 相</div>
+                <div class="legend-item"><div class="legend-color" style="background: #ef4444;"></div> C 相</div>
+                <div class="legend-item" style="margin-top: 0.5rem;">
+                   <div style="width: 12px; height: 12px; border: 1px solid #94a3b8; background: #ffffff; display: flex; align-items: center; justify-content: center; margin-right: 8px;"><div style="width: 8px; height: 2px; background: #10b981;"></div></div> 
+                   断路器 (合)
+                </div>
+                <div class="legend-item">
+                   <div style="width: 12px; height: 12px; border: 1px solid #94a3b8; background: #ffffff; display: flex; align-items: center; justify-content: center; margin-right: 8px;"><div style="width: 8px; height: 2px; background: #ef4444; transform: rotate(45deg);"></div></div> 
+                   断路器 (跳)
+                </div>
+            </div>
+        </div>
+
+        <div class="alarm-overlay" id="alarm-overlay"></div>
+
+        <!-- 底部面板 -->
+        <div class="bottom-panel">
+            <div class="status-section">
+                <div class="status-icon-box" id="status-icon">
+                    <!-- Icon via JS -->
+                </div>
+                <div>
+                    <div style="font-size: 0.75rem; color: #64748b; font-weight: bold; margin-bottom: 0.25rem;">系统状态</div>
+                    <div id="status-text" style="font-size: 1.125rem; font-weight: bold;">正常运行</div>
+                </div>
+            </div>
+
+            <div class="explanation-section">
+                <div class="explanation-title">
+                    <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--teal); margin-right: 6px;" class="anim-pulse"></div>
+                    保护动作分析
+                </div>
+                <p class="explanation-text" id="explanation-text">请在右侧点击虚线圈 (k1/k2) 设置故障点。</p>
+            </div>
+
+            <div class="data-section">
+                <div>
+                    <div class="data-col-header">线路 I</div>
+                    <div class="data-row">
+                        <span style="color: #64748b;">故障流</span>
+                        <span id="l1-phases" style="font-family: monospace; font-weight: bold; color: #0f172a;">-</span>
+                    </div>
+                    <div class="data-row">
+                        <span style="color: #64748b;">状态</span>
+                        <span id="l1-status" class="tag" style="background: transparent; color: #64748b;">不动作</span>
+                    </div>
+                </div>
+                <div>
+                    <div class="data-col-header">线路 II</div>
+                    <div class="data-row">
+                        <span style="color: #64748b;">故障流</span>
+                        <span id="l2-phases" style="font-family: monospace; font-weight: bold; color: #0f172a;">-</span>
+                    </div>
+                    <div class="data-row">
+                        <span style="color: #64748b;">状态</span>
+                        <span id="l2-status" class="tag" style="background: transparent; color: #64748b;">不动作</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- 常量定义 (亮色适配) ---
+        const COLORS = {
+            A: '#f59e0b', // Amber
+            B: '#10b981', // Emerald
+            C: '#ef4444', // Red
+            WireNeutral: '#94a3b8',
+            WireActive: '#e11d48', // Rose (故障电流)
+            WireNormal: '#cbd5e1',
+            Bus: '#475569'
+        };
+
+        const STROKE_WIDTH = {
+            WIRE: 2.5,
+            BUS: 5
+        };
+
+        // --- 应用状态 ---
+        const state = {
+            topology: 'Series', // 'Series' | 'Parallel'
+            wiringMode: 'ThreePhaseStar', // 'ThreePhaseStar' | 'TwoPhaseStar'
+            fault1: null, // 'A' | 'B' | 'C' | null
+            fault2: null  // 'A' | 'B' | 'C' | null
+        };
+
+        // --- 逻辑计算核心 ---
+        function calculateSimulation() {
+            const { topology, wiringMode, fault1, fault2 } = state;
+            
+            const res = {
+                line1SeesCurrent: false,
+                line2SeesCurrent: false,
+                trippedBreaker1: false,
+                trippedBreaker2: false,
+                explanation: "请在右侧点击虚线圈 (k1/k2) 设置故障点。",
+                activePhasesL1: [],
+                activePhasesL2: []
+            };
+
+            if (!fault1 || !fault2) {
+                if (fault1 || fault2) {
+                    res.explanation = "单相接地状态：系统允许短时运行，不跳闸。\n请设置第二点故障以演示异地两相短路。";
+                }
+                return res;
+            }
+
+            if (fault1 === fault2) {
+                res.explanation = "同相接地：属于单相短路，非异地两相故障。\n请选择不同相位的故障点。";
+                return res;
+            }
+
+            const hasCT = (p) => {
+                if (wiringMode === 'ThreePhaseStar') return true;
+                if (wiringMode === 'TwoPhaseStar') return p === 'A' || p === 'C';
+                return false;
+            };
+
+            if (topology === 'Series') {
+                res.activePhasesL2 = [fault2];
+                res.activePhasesL1 = [fault1, fault2];
+
+                const relay2Sees = hasCT(fault2);
+                const relay1Sees = hasCT(fault1) || hasCT(fault2);
+
+                res.line1SeesCurrent = relay1Sees;
+                res.line2SeesCurrent = relay2Sees;
+
+                if (relay2Sees) {
+                    res.trippedBreaker2 = true;
+                    res.explanation = `线路 II 监测到 ${fault2} 相故障，断路器 II 正确跳闸。\n保护具有 100% 选择性，切除末端故障，保证线路 I 供电。`;
+                } else if (relay1Sees) {
+                    res.trippedBreaker1 = true;
+                    res.explanation = `线路 II 在 ${fault2} 相无TA(死区)拒动。\n线路 I 保护检测到电流，越级跳闸。`;
+                } else {
+                    res.explanation = "两套保护均处于死区，无法检测到故障。";
+                }
+            } else {
+                res.activePhasesL1 = [fault1];
+                res.activePhasesL2 = [fault2];
+
+                const relay1Sees = hasCT(fault1);
+                const relay2Sees = hasCT(fault2);
+
+                res.line1SeesCurrent = relay1Sees;
+                res.line2SeesCurrent = relay2Sees;
+
+                if (relay1Sees) res.trippedBreaker1 = true;
+                if (relay2Sees) res.trippedBreaker2 = true;
+
+                if (relay1Sees && relay2Sees) {
+                    res.explanation = `两条线路保护均动作，QF1和QF2同时跳闸。\n后果：两条线路均断电，保护失去选择性。`;
+                } else if (relay1Sees) {
+                    res.explanation = `QF1跳闸切除故障，QF2无TA不动作。\n结果：成功隔离故障线路，非故障线路继续运行 (选择性成功)。`;
+                } else if (relay2Sees) {
+                    res.explanation = `QF2跳闸切除故障，QF1无TA不动作。\n结果：成功隔离故障线路，非故障线路继续运行 (选择性成功)。`;
+                } else {
+                    res.explanation = "两套保护均处于死区，无法检测到故障。";
+                }
+            }
+
+            return res;
+        }
+
+        // --- 交互控制函数 ---
+        function setTopology(val) {
+            state.topology = val;
+            state.fault1 = null;
+            state.fault2 = null;
+            updateUI();
+        }
+
+        function setWiringMode(val) {
+            state.wiringMode = val;
+            updateUI();
+        }
+
+        function toggleFault(lineId, phase) {
+            if (lineId === 1) {
+                state.fault1 = state.fault1 === phase ? null : phase;
+            } else {
+                state.fault2 = state.fault2 === phase ? null : phase;
+            }
+            updateUI();
+        }
+
+        // --- SVG 渲染引擎 ---
+        function createSVGElement(type, attrs) {
+            const el = document.createElementNS("http://www.w3.org/2000/svg", type);
+            for (const key in attrs) {
+                if (key === 'className') el.setAttribute('class', attrs[key]);
+                else if (key === 'textContent') el.textContent = attrs[key];
+                else el.setAttribute(key, attrs[key]);
+            }
+            return el;
+        }
+function renderDiagram() {
+            const container = document.getElementById('diagram-container');
+            const legend = container.querySelector('.legend');
+            container.innerHTML = '';
+            if(legend) container.appendChild(legend);
+
+            const result = calculateSimulation();
+
+            const svg = createSVGElement('svg', {
+                viewBox: "0 0 1000 380",
+                preserveAspectRatio: "xMidYMid meet"
+            });
+            
+            const startX = 60, startY = 190;
+            const busX_A = 160, busX_B = 180, busX_C = 200;
+            const phases = ['A', 'B', 'C'];
+            
+            const isBusMActive = (p) => result.activePhasesL1.includes(p) || result.activePhasesL2.includes(p);
+
+            // 1. 绘制接地回路
+            if (state.fault1 && state.fault2 && state.fault1 !== state.fault2) {
+                let pathD = "";
+                const getCoords = (lineId, p) => {
+                    const yOffset = 16;
+                    if (state.topology === 'Series') {
+                        const Y = { 'A': 120, 'B': 190, 'C': 260 };
+                        return { x: lineId === 1 ? 400 : 740, y: Y[p] + yOffset };
+                    } else {
+                        const Y1 = { 'A': 50, 'B': 95, 'C': 140 };
+                        const Y2 = { 'A': 240, 'B': 285, 'C': 330 };
+                        return { x: 650, y: (lineId === 1 ? Y1[p] : Y2[p]) + yOffset };
+                    }
+                };
+                const p1 = getCoords(1, state.fault1);
+                const p2 = getCoords(2, state.fault2);
+
+                if (state.topology === 'Parallel') {
+                    const cpX = p1.x + 140;
+                    const cpY = (p1.y + p2.y) / 2;
+                    pathD = `M ${p1.x} ${p1.y} Q ${cpX} ${cpY} ${p2.x} ${p2.y}`;
+                } else {
+                    const cpY = Math.max(p1.y, p2.y) + 90;
+                    pathD = `M ${p1.x} ${p1.y} Q ${(p1.x+p2.x)/2} ${cpY} ${p2.x} ${p2.y}`;
+                }
+
+                const earthPath = createSVGElement('path', {
+                    d: pathD, fill: 'none', stroke: '#ef4444', 'stroke-width': 2,
+                    'stroke-dasharray': "8,6", class: "anim-pulse", opacity: 0.6
+                });
+                svg.appendChild(earthPath);
+            }
+
+            // 2. 绘制母线 M 和 连接线
+            phases.forEach(p => {
+                const ySrc = startY + (p === 'A' ? -15 : p === 'B' ? 0 : 15);
+                const xBus = p === 'A' ? busX_A : p === 'B' ? busX_B : busX_C;
+                const active = isBusMActive(p);
+                const line = createSVGElement('path', {
+                    d: `M ${startX} ${ySrc} L ${xBus} ${ySrc}`,
+                    stroke: active ? COLORS.WireActive : COLORS[p],
+                    'stroke-width': active ? STROKE_WIDTH.WIRE : 2,
+                    'stroke-dasharray': active ? "6,4" : "none",
+                    class: active ? "anim-pulse" : "",
+                    opacity: active ? 1 : 0.6
+                });
+                svg.appendChild(line);
+            });
+            
+            phases.forEach(p => {
+                const xBus = p === 'A' ? busX_A : p === 'B' ? busX_B : busX_C;
+                const bus = createSVGElement('line', {
+                    x1: xBus, y1: 30, x2: xBus, y2: 350,
+                    stroke: COLORS[p], 'stroke-width': STROKE_WIDTH.BUS, 'stroke-linecap': 'round'
+                });
+                svg.appendChild(bus);
+                const txt = createSVGElement('text', {
+                    x: xBus, y: 18, fill: COLORS[p],
+                    'text-anchor': 'middle', 'font-size': 12, 'font-weight': 'bold', textContent: p
+                });
+                svg.appendChild(txt);
+            });
+            svg.appendChild(createSVGElement('text', {
+                x: busX_B, y: 375, fill: '#64748b', 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 'bold', textContent: '母线 M'
+            }));
+
+            // 3. 绘制线路
+            if (state.topology === 'Series') {
+                const Y = { 'A': 120, 'B': 190, 'C': 260 };
+                const k1X = 400, k2X = 740;
+                const line1Start = 240;
+                const busP = { 'A': 550, 'B': 570, 'C': 590 };
+                const busQ = { 'A': 880, 'B': 900, 'C': 920 };
+
+                ['P', 'Q'].forEach(bName => {
+                    const busObj = bName === 'P' ? busP : busQ;
+                    phases.forEach(p => {
+                        svg.appendChild(createSVGElement('line', {
+                            x1: busObj[p], y1: 100, x2: busObj[p], y2: 280,
+                            stroke: COLORS[p], 'stroke-width': STROKE_WIDTH.BUS, 'stroke-linecap': 'round'
+                        }));
+                        svg.appendChild(createSVGElement('text', {
+                            x: busObj[p], y: 88, fill: COLORS[p], 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 'bold', textContent: p
+                        }));
+                    });
+                    svg.appendChild(createSVGElement('text', {
+                        x: busObj['B'], y: 305, fill: '#64748b', 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 'bold', textContent: `母线 ${bName}`
+                    }));
+                });
+
+                phases.forEach(p => {
+                    const y = Y[p];
+                    const color = COLORS[p];
+                    const mX = p === 'A' ? busX_A : p === 'B' ? busX_B : busX_C;
+                    
+                    const l1Active = result.activePhasesL1.includes(p);
+                    const l2Active = result.activePhasesL2.includes(p);
+                    
+                    const preK1 = (p === state.fault1 && l1Active) || (p !== state.fault1 && l1Active);
+                    const postK1 = (p !== state.fault1 && l1Active);
+                    const preK2 = (p === state.fault2 && l2Active);
+
+                    if (l1Active) {
+                        const ySrc = startY + (p === 'A' ? -15 : p === 'B' ? 0 : 15);
+                        svg.appendChild(createSVGElement('line', {
+                            x1: mX, y1: ySrc, x2: mX, y2: y,
+                            stroke: COLORS.WireActive, 'stroke-width': STROKE_WIDTH.WIRE, 'stroke-dasharray': "6,4", class: "anim-pulse"
+                        }));
+                    }
+                    svg.appendChild(createSVGElement('circle', { cx: mX, cy: y, r: 3, fill: '#ffffff', stroke: '#94a3b8' }));
+
+                    drawSegment(svg, mX, y, line1Start, y, l1Active, color);
+                    drawSegment(svg, line1Start, y, k1X, y, preK1, color);
+                    drawSegment(svg, k1X, y, busP[p], y, postK1, color);
+                    
+                    drawBreaker(svg, line1Start+40, y, result.trippedBreaker1, l1Active, p==='A'?"QF1":"");
+                    drawCT(svg, line1Start+80, y, p, l1Active);
+                    drawFaultPoint(svg, k1X, y, p, state.fault1 === p, 1, "k1");
+
+                    svg.appendChild(createSVGElement('circle', { cx: busP[p], cy: y, r: 3, fill: '#ffffff', stroke: '#94a3b8' }));
+                    drawSegment(svg, busP[p], y, k2X, y, preK2, color);
+                    drawSegment(svg, k2X, y, busQ[p], y, false, color);
+                    
+                    drawBreaker(svg, 650, y, result.trippedBreaker2, l2Active, p==='A'?"QF2":"");
+                    drawCT(svg, 690, y, p, l2Active);
+                    drawFaultPoint(svg, k2X, y, p, state.fault2 === p, 2, "k2");
+                    svg.appendChild(createSVGElement('circle', { cx: busQ[p], cy: y, r: 3, fill: '#ffffff', stroke: '#94a3b8' }));
+                });
+
+            } else {
+                const Y1 = { 'A': 50, 'B': 95, 'C': 140 };
+                const Y2 = { 'A': 240, 'B': 285, 'C': 330 };
+                const lineStart = 230;
+                const kX = 650;
+                const endX = 900;
+
+                svg.appendChild(createSVGElement('text', { x: 420, y: 25, fill: '#64748b', 'font-weight': 'bold', 'text-anchor': 'middle', textContent: '线路 I' }));
+                svg.appendChild(createSVGElement('text', { x: 420, y: 215, fill: '#64748b', 'font-weight': 'bold', 'text-anchor': 'middle', textContent: '线路 II' }));
+
+                phases.forEach(p => {
+                    const mX = p === 'A' ? busX_A : p === 'B' ? busX_B : busX_C;
+                    const y1 = Y1[p];
+                    const y2 = Y2[p];
+                    const color = COLORS[p];
+
+                    const l1Active = (p === state.fault1) && result.activePhasesL1.includes(p);
+                    const l2Active = (p === state.fault2) && result.activePhasesL2.includes(p);
+
+                    const ySrc = startY + (p === 'A' ? -15 : p === 'B' ? 0 : 15);
+                    if (l1Active) svg.appendChild(createSVGElement('line', { x1: mX, y1: ySrc, x2: mX, y2: y1, stroke: COLORS.WireActive, 'stroke-width': STROKE_WIDTH.WIRE, 'stroke-dasharray': "6,4", class: "anim-pulse" }));
+                    if (l2Active) svg.appendChild(createSVGElement('line', { x1: mX, y1: ySrc, x2: mX, y2: y2, stroke: COLORS.WireActive, 'stroke-width': STROKE_WIDTH.WIRE, 'stroke-dasharray': "6,4", class: "anim-pulse" }));
+                    
+                    svg.appendChild(createSVGElement('circle', { cx: mX, cy: y1, r: 3, fill: '#ffffff', stroke: '#94a3b8' }));
+                    svg.appendChild(createSVGElement('circle', { cx: mX, cy: y2, r: 3, fill: '#ffffff', stroke: '#94a3b8' }));
+
+                    drawSegment(svg, mX, y1, lineStart, y1, l1Active, color);
+                    drawSegment(svg, lineStart, y1, kX, y1, l1Active, color);
+                    drawSegment(svg, kX, y1, endX, y1, false, color);
+                    drawBreaker(svg, lineStart+60, y1, result.trippedBreaker1, l1Active, p==='A'?"QF1":"");
+                    drawCT(svg, lineStart+100, y1, p, l1Active);
+                    drawFaultPoint(svg, kX, y1, p, state.fault1 === p, 1, "k1");
+
+                    drawSegment(svg, mX, y2, lineStart, y2, l2Active, color);
+                    drawSegment(svg, lineStart, y2, kX, y2, l2Active, color);
+                    drawSegment(svg, kX, y2, endX, y2, false, color);
+                    drawBreaker(svg, lineStart+60, y2, result.trippedBreaker2, l2Active, p==='A'?"QF2":"");
+                    drawCT(svg, lineStart+100, y2, p, l2Active);
+                    drawFaultPoint(svg, kX, y2, p, state.fault2 === p, 2, "k2");
+                });
+            }
+
+            // 4. 最后绘制 Power G
+            const gGroup = createSVGElement('g', { transform: `translate(${startX}, ${startY})` });
+            gGroup.appendChild(createSVGElement('circle', { cx: 0, cy: 0, r: 22, stroke: '#94a3b8', 'stroke-width': 2.5, fill: '#ffffff', 'fill-opacity': 1 }));
+            gGroup.appendChild(createSVGElement('path', { d: "M -12 0 Q -6 -12, 0 0 T 12 0", stroke: '#94a3b8', 'stroke-width': 2.5, fill: 'none' }));
+            svg.appendChild(gGroup);
+            svg.appendChild(createSVGElement('text', { x: startX, y: startY + 44, fill: '#64748b', 'font-size': 12, 'font-weight': 'bold', 'text-anchor': 'middle', textContent: '电源 G' }));
+
+            container.appendChild(svg);
+        }
+
+        // --- 绘图辅助函数 ---
+        function drawSegment(svg, x1, y1, x2, y2, active, defaultColor) {
+            svg.appendChild(createSVGElement('line', {
+                x1, y1, x2, y2,
+                stroke: active ? COLORS.WireActive : defaultColor,
+                'stroke-width': STROKE_WIDTH.WIRE,
+                'stroke-dasharray': active ? "6,4" : "none",
+                class: active ? "anim-pulse" : "",
+                opacity: active ? 1 : 0.4
+            }));
+        }
+
+        function drawBreaker(svg, x, y, isOpen, active, label) {
+            const g = createSVGElement('g', { transform: `translate(${x}, ${y})` });
+            const boxS = 24;
+            g.appendChild(createSVGElement('rect', { x: -boxS/2, y: -boxS/2, width: boxS, height: boxS, fill: '#ffffff', stroke: '#94a3b8', rx: 2 }));
+            g.appendChild(createSVGElement('line', { x1: -14, y1: 0, x2: -10, y2: 0, stroke: active ? COLORS.WireActive : COLORS.WireNormal, 'stroke-width': 2.5 }));
+            g.appendChild(createSVGElement('line', { x1: 10, y1: 0, x2: 14, y2: 0, stroke: active ? COLORS.WireActive : COLORS.WireNormal, 'stroke-width': 2.5 }));
+            
+            if (isOpen) {
+                const xGroup = createSVGElement('g', { transform: 'translate(10, 0)' });
+                xGroup.appendChild(createSVGElement('line', { x1: -3, y1: -3, x2: 3, y2: 3, stroke: '#ef4444', 'stroke-width': 2 }));
+                xGroup.appendChild(createSVGElement('line', { x1: -3, y1: 3, x2: 3, y2: -3, stroke: '#ef4444', 'stroke-width': 2 }));
+                g.appendChild(xGroup);
+                g.appendChild(createSVGElement('line', { x1: -10, y1: 0, x2: 8, y2: -10, stroke: '#ef4444', 'stroke-width': 2.5, 'stroke-linecap': 'round' }));
+            } else {
+                g.appendChild(createSVGElement('circle', { r: 3, fill: '#10b981' }));
+                g.appendChild(createSVGElement('line', { x1: -10, y1: 0, x2: 10, y2: 0, stroke: '#10b981', 'stroke-width': 2.5, 'stroke-linecap': 'round' }));
+            }
+
+            if (label) {
+                g.appendChild(createSVGElement('text', { x: 0, y: -22, 'text-anchor': 'middle', 'font-size': 12, fill: '#475569', 'font-weight': 'bold', textContent: label }));
+            }
+            svg.appendChild(g);
+        }
+
+        function drawCT(svg, x, y, phase, active) {
+            const hasCT = (state.wiringMode === 'ThreePhaseStar') || (state.wiringMode === 'TwoPhaseStar' && (phase === 'A' || phase === 'C'));
+            
+            const g = createSVGElement('g', { transform: `translate(${x}, ${y})` });
+            g.appendChild(createSVGElement('circle', {
+                r: 9,
+                stroke: hasCT ? '#94a3b8' : '#cbd5e1',
+                'stroke-width': 1.5,
+                fill: (active && hasCT) ? "rgba(239, 68, 68, 0.1)" : "#f8fafc",
+                'stroke-dasharray': hasCT ? "none" : "3,2"
+            }));
+            
+            if (hasCT) {
+                g.appendChild(createSVGElement('text', { x: 0, y: 3.5, 'font-size': 9, 'text-anchor': 'middle', fill: '#64748b', 'font-weight': 'bold', textContent: 'TA' }));
+                
+                if (active) {
+                    const iG = createSVGElement('g', { transform: 'translate(8, -8)' });
+                    iG.appendChild(createSVGElement('circle', { r: 6, fill: '#10b981', stroke: '#ffffff' }));
+                    iG.appendChild(createSVGElement('path', { d: "M -3 0 L -1 3 L 3 -3", stroke: 'white', fill: 'none', 'stroke-width': 1.5 }));
+                    g.appendChild(iG);
+                }
+            }
+            svg.appendChild(g);
+        }
+
+        function drawFaultPoint(svg, x, y, phase, isActive, lineId, label) {
+            const g = createSVGElement('g', { 
+                transform: `translate(${x}, ${y})`, 
+                class: 'cursor-pointer hover-glow',
+                onclick: `toggleFault(${lineId}, '${phase}')`
+            });
+
+            if (!isActive) {
+                g.appendChild(createSVGElement('circle', { r: 14, fill: 'transparent', stroke: '#94a3b8', 'stroke-width': 1.5, 'stroke-dasharray': '3,2' }));
+                g.appendChild(createSVGElement('text', { x: 0, y: 4, 'text-anchor': 'middle', 'font-size': 10, fill: '#64748b', textContent: label }));
+            } else {
+                const color = '#ef4444';
+                const pulse = createSVGElement('g', { class: 'anim-pulse' });
+                pulse.appendChild(createSVGElement('circle', { r: 3, fill: color }));
+                const groundY = 16;
+                pulse.appendChild(createSVGElement('line', { x1: 0, y1: -12, x2: 0, y2: groundY, stroke: color, 'stroke-width': 2.5 }));
+                pulse.appendChild(createSVGElement('path', { d: `M -5 ${groundY-6} L 0 ${groundY} L 5 ${groundY-6}`, fill: 'none', stroke: color, 'stroke-width': 2.5 }));
+                const gr = createSVGElement('g', { transform: `translate(0, ${groundY})` });
+                gr.appendChild(createSVGElement('line', { x1: -10, y1: 0, x2: 10, y2: 0, stroke: color, 'stroke-width': 2 }));
+                gr.appendChild(createSVGElement('line', { x1: -6, y1: 4, x2: 6, y2: 4, stroke: color, 'stroke-width': 2 }));
+                gr.appendChild(createSVGElement('line', { x1: -2, y1: 8, x2: 2, y2: 8, stroke: color, 'stroke-width': 2 }));
+                pulse.appendChild(gr);
+                pulse.appendChild(createSVGElement('text', { x: 14, y: -10, 'font-size': 12, fill: color, 'font-weight': 'bold', textContent: label }));
+                g.appendChild(pulse);
+            }
+            svg.appendChild(g);
+        }
+
+        // --- UI 更新函数 ---
+        function updateUI() {
+            const result = calculateSimulation();
+            const hasTrip = result.trippedBreaker1 || result.trippedBreaker2;
+
+            document.getElementById('btn-series').className = `btn ${state.topology === 'Series' ? 'active' : ''}`;
+            document.getElementById('btn-parallel').className = `btn ${state.topology === 'Parallel' ? 'active' : ''}`;
+            document.getElementById('radio-3ph').className = `radio-item ${state.wiringMode === 'ThreePhaseStar' ? 'active' : ''}`;
+            document.getElementById('radio-2ph').className = `radio-item ${state.wiringMode === 'TwoPhaseStar' ? 'active' : ''}`;
+
+            const statusIcon = document.getElementById('status-icon');
+            const statusText = document.getElementById('status-text');
+            const overlay = document.getElementById('alarm-overlay');
+
+            if (hasTrip) {
+                statusIcon.innerHTML = `<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="color: #ef4444;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+                statusIcon.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+                statusIcon.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+                statusText.textContent = "故障跳闸";
+                statusText.style.color = "#ef4444";
+                overlay.className = "alarm-overlay active";
+            } else {
+                statusIcon.innerHTML = `<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="color: #10b981;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>`;
+                statusIcon.style.borderColor = 'rgba(16, 185, 129, 0.5)';
+                statusIcon.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+                statusText.textContent = "正常运行";
+                statusText.style.color = "#10b981";
+                overlay.className = "alarm-overlay";
+            }
+
+            document.getElementById('explanation-text').textContent = result.explanation;
+
+            document.getElementById('l1-phases').textContent = result.activePhasesL1.length ? result.activePhasesL1.join(',') : '-';
+            document.getElementById('l2-phases').textContent = result.activePhasesL2.length ? result.activePhasesL2.join(',') : '-';
+            
+            const updateTag = (el, active, tripped) => {
+                if (!active) {
+                    el.textContent = "不动作";
+                    el.style.color = "#64748b";
+                    el.style.background = "transparent";
+                    el.style.border = "none";
+                } else if (tripped) {
+                    el.textContent = "跳闸";
+                    el.style.color = "#dc2626";
+                    el.style.background = "#fee2e2";
+                    el.style.border = "1px solid #fca5a5";
+                } else {
+                    el.textContent = "启动";
+                    el.style.color = "#d97706";
+                    el.style.background = "#fef3c7";
+                    el.style.border = "none";
+                }
+            };
+            
+            updateTag(document.getElementById('l1-status'), result.line1SeesCurrent, result.trippedBreaker1);
+            updateTag(document.getElementById('l2-status'), result.line2SeesCurrent, result.trippedBreaker2);
+
+            renderDiagram();
+        }
+
+        // 初始化
+        window.addEventListener('resize', renderDiagram);
+        updateUI();
+
+    </script>
+</body>
+</html>

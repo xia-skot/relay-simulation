@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>变压器励磁涌流仿真</title>
+  
+  <!-- 1. 引入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 2. 按顺序引入 React 及相关依赖 (使用国内访问更稳定的 jsdelivr) -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- 3. 引入 Recharts 必须的 prop-types -->
+  <script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js" crossorigin></script>
+  
+  <!-- 4. 引入 Recharts 图表库 -->
+  <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.3/umd/Recharts.js" crossorigin></script>
+  
+  <!-- 5. 引入 Babel 用于解析 JSX -->
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.0/babel.min.js" crossorigin></script>
+  
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; color: #64748b;">
+      正在加载仿真环境，请稍候... (如果长时间不显示，请检查网络是否能访问 jsdelivr CDN)
+    </div>
+  </div>
+  
+  <script>
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      document.getElementById('root').innerHTML = 
+        '<div style="padding: 20px; color: #ef4444; font-family: sans-serif;">' +
+        '<h3 style="font-weight: bold;">加载失败</h3>' +
+        '<p>错误信息: ' + msg + '</p>' +
+        '<p>请检查网络，或尝试刷新页面。</p>' +
+        '</div>';
+      return false;
+    };
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+    const {
+      LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+      ComposedChart, ReferenceDot, ReferenceLine, Legend, BarChart, Bar, Cell
+    } = window.Recharts;
+
+    function App() {
+      const [alpha, setAlpha] = useState(0);
+      const [phiRes, setPhiRes] = useState(0.8);
+      const [currentFrame, setCurrentFrame] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [showFFT, setShowFFT] = useState(false);
+
+      const maxTime = 8 * Math.PI; 
+      const numPoints = 400;
+      const dt = maxTime / numPoints;
+      const tau = 50; 
+
+      const PHI_S = 1.2; 
+      const I_S = 0.5;   
+      const K_SAT = 10;  
+
+      useEffect(() => {
+        setCurrentFrame(0);
+        setIsPlaying(false);
+      }, [alpha, phiRes]);
+
+      useEffect(() => {
+        let animationFrameId;
+        if (isPlaying) {
+          const render = () => {
+            setCurrentFrame((prev) => {
+              if (prev >= numPoints) {
+                setIsPlaying(false);
+                return prev;
+              }
+              return prev + 2; 
+            });
+            animationFrameId = requestAnimationFrame(render);
+          };
+          animationFrameId = requestAnimationFrame(render);
+        }
+        return () => cancelAnimationFrame(animationFrameId);
+      }, [isPlaying, numPoints]);
+
+      const getExcitationCurrent = (phi) => {
+        if (Math.abs(phi) <= PHI_S) {
+          return (I_S / PHI_S) * phi;
+        } else {
+          const sign = Math.sign(phi);
+          return sign * I_S + (phi - sign * PHI_S) * K_SAT;
+        }
+      };
+
+      const fullData = useMemo(() => {
+        const data = [];
+        const alphaRad = (alpha * Math.PI) / 180;
+
+        for (let i = 0; i <= numPoints; i++) {
+          const t = i * dt;
+          // 使用标幺值，电压幅值为1
+          const u = Math.sin(t + alphaRad);
+          const phiSteady = -Math.cos(t + alphaRad);
+          const phiTransient = (phiRes + Math.cos(alphaRad)) * Math.exp(-t / tau);
+          const phi = phiSteady + phiTransient;
+          const current = getExcitationCurrent(phi);
+          data.push({ t, u, phi, phiSteady, phiTransient, i: current });
+        }
+        return data;
+      }, [alpha, phiRes, dt, numPoints]);
+
+      const phi_p = useMemo(() => {
+        if (fullData.length === 0) return 0;
+        return Math.max(...fullData.map(d => d.phi));
+      }, [fullData]);
+      const i_p = getExcitationCurrent(phi_p);
+
+      const phiICurveData = useMemo(() => {
+        const data = [];
+        for (let phi = -3; phi <= 3; phi += 0.05) {
+          data.push({ phi, i: getExcitationCurrent(phi) });
+        }
+        return data;
+      }, []);
+
+      const harmonicsData = useMemo(() => {
+        if (fullData.length === 0) return [];
+        const N = numPoints;
+        const cycles = 4;
+        const harmonics = [];
+
+        for (let h = 0; h <= 7; h++) {
+          const k = h * cycles;
+          let sumRe = 0;
+          let sumIm = 0;
+          for (let n = 0; n < N; n++) {
+            const angle = (2 * Math.PI * k * n) / N;
+            sumRe += fullData[n].i * Math.cos(angle);
+            sumIm -= fullData[n].i * Math.sin(angle);
+          }
+          const magnitude = Math.sqrt(sumRe * sumRe + sumIm * sumIm);
+          const amplitude = h === 0 ? magnitude / N : (2 * magnitude) / N;
+          harmonics.push({
+            name: h === 0 ? 'DC' : `${h}次`,
+            amplitude: amplitude
+          });
+        }
+        return harmonics;
+      }, [fullData, numPoints]);
+
+      const currentData = fullData.slice(0, currentFrame + 1);
+      const currentPoint = fullData[currentFrame] || fullData[0];
+
+      const formatTime = (val) => (val / Math.PI).toFixed(1) + 'π';
+
+      return (
+        <div className="h-screen w-screen overflow-hidden bg-slate-50 flex flex-col font-sans text-slate-900 p-2 md:p-3">
+          <header className="flex-none mb-2 md:mb-3 flex items-center justify-between px-2">
+            <div>
+              <h1 className="text-lg md:text-xl font-bold text-slate-900">变压器励磁涌流仿真</h1>
+              <p className="text-slate-500 text-xs mt-0.5">观察合闸角和剩磁对励磁涌流的影响</p>
+            </div>
+            <div className="hidden md:flex items-center gap-2 text-xs text-slate-600 bg-white px-3 py-1.5 rounded-md border border-slate-200 shadow-sm">
+              <span className="text-blue-500 font-bold">ℹ</span>
+              <span>模型: u = sin(ωt+α), Φ = ∫u dt + Φr, i = 分段线性函数(教材模型)</span>
+            </div>
+          </header>
+
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-2 md:gap-3 min-h-0">
+            <div className="lg:col-span-3 flex flex-col gap-2 md:gap-3 min-h-0">
+              <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 flex-none">
+                <h2 className="text-sm font-semibold mb-3 text-slate-800">参数设置</h2>
+                
+                <div className="mb-3">
+                  <div className="flex justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-700">合闸角 α (度)</label>
+                    <span className="text-xs text-slate-500 font-mono bg-slate-100 px-1.5 rounded">{alpha}°</span>
+                  </div>
+                  <input
+                    type="range" min="0" max="360" value={alpha}
+                    onChange={(e) => setAlpha(Number(e.target.value))}
+                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <div className="flex justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-700">剩磁 Φr (标幺值)</label>
+                    <span className="text-xs text-slate-500 font-mono bg-slate-100 px-1.5 rounded">{phiRes.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range" min="-0.8" max="0.8" step="0.01" value={phiRes}
+                    onChange={(e) => setPhiRes(Number(e.target.value))}
+                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-red-600"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setIsPlaying(!isPlaying)}
+                    className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors ${
+                      isPlaying ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-blue-600 text-white hover:bg-blue-700'
+                    }`}
+                  >
+                    {isPlaying ? <><span style={{fontSize: '14px'}}>⏸</span> 暂停</> : <><span style={{fontSize: '14px'}}>▶</span> 播放</>}
+                  </button>
+                  <button
+                    onClick={() => { setIsPlaying(false); setCurrentFrame(0); }}
+                    className="flex items-center justify-center gap-1 py-1.5 px-2 rounded-md text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                  >
+                    <span style={{fontSize: '14px'}}>↺</span> 重置
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1"></div>
+
+              <div className="flex-none mt-2 mb-2">
+                <div className="text-xs text-slate-500 text-center leading-relaxed font-mono opacity-80">
+                  <p> | </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-4 flex flex-col gap-2 md:gap-3 min-h-0">
+              <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col min-h-0">
+                <div className="flex justify-between items-center mb-1 flex-none">
+                  <h2 className="text-sm font-semibold text-slate-800">稳态电压与磁通 (标幺值)</h2>
+                  <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">U̇ = j4.44fNΦ̇</span>
+                </div>
+                <div className="flex-1 min-h-0 w-full mt-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={currentData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="t" type="number" domain={[0, maxTime]} tickFormatter={formatTime} tick={{ fontSize: 10 }} />
+                      <YAxis domain={[-1.5, 1.5]} tick={{ fontSize: 10 }} />
+                      <Tooltip 
+                        labelFormatter={formatTime} 
+                        contentStyle={{ fontSize: '10px', padding: '4px 8px', borderRadius: '6px', backgroundColor: 'rgba(255, 255, 255, 0.85)' }}
+                        itemStyle={{ padding: 0, margin: 0 }}
+                      />
+                      <Legend verticalAlign="top" height={24} iconType="plainline" wrapperStyle={{ fontSize: '11px' }} />
+                      <ReferenceLine y={0} stroke="#cbd5e1" />
+                      <Line type="monotone" dataKey="u" name="电压 u*" stroke="#3b82f6" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="phiSteady" name="磁通 Φm*" stroke="#f59e0b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col min-h-0">
+                <h2 className="text-sm font-semibold mb-1 text-slate-800">磁化特性曲线 (i-Φ)</h2>
+                <div className="flex-1 min-h-0 w-full mt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart margin={{ top: 5, right: 10, left: -20, bottom: 15 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis 
+                        type="number" dataKey="i" domain={[-10, 10]} tick={{ fontSize: 10 }}
+                        tickFormatter={(val) => Number(val).toFixed(1).replace(/\.0$/, '')}
+                        label={{ value: '励磁电流 i', position: 'insideBottom', offset: -10, fontSize: 11 }}
+                      />
+                      <YAxis 
+                        type="number" dataKey="phi" domain={[-3, 3]} tick={{ fontSize: 10 }}
+                        label={{ value: '磁通 Φ', angle: -90, position: 'insideLeft', fontSize: 11 }}
+                      />
+                      <Tooltip 
+                        cursor={{ strokeDasharray: '3 3' }} 
+                        contentStyle={{ fontSize: '10px', padding: '4px 8px', borderRadius: '6px', backgroundColor: 'rgba(255, 255, 255, 0.85)' }}
+                        itemStyle={{ padding: 0, margin: 0 }}
+                      />
+                      <ReferenceLine x={0} stroke="#cbd5e1" />
+                      <ReferenceLine y={0} stroke="#cbd5e1" />
+                      
+                      <ReferenceLine segment={[{ x: 0, y: PHI_S }, { x: I_S, y: PHI_S }]} stroke="#fca5a5" strokeDasharray="3 3" />
+                      <ReferenceLine segment={[{ x: I_S, y: 0 }, { x: I_S, y: PHI_S }]} stroke="#fca5a5" strokeDasharray="3 3" />
+                      <ReferenceLine y={PHI_S} stroke="none" label={{ position: 'left', value: 'Φs', fill: '#ef4444', fontSize: 10 }} />
+                      
+                      <ReferenceLine segment={[{ x: 0, y: phi_p }, { x: i_p, y: phi_p }]} stroke="#93c5fd" strokeDasharray="3 3" />
+                      <ReferenceLine segment={[{ x: i_p, y: 0 }, { x: i_p, y: phi_p }]} stroke="#93c5fd" strokeDasharray="3 3" />
+                      <ReferenceLine y={phi_p} stroke="none" label={{ position: 'left', value: 'Φp', fill: '#3b82f6', fontSize: 10 }} />
+
+                      <Line 
+                        data={phiICurveData} dataKey="phi" type="monotone" stroke="#94a3b8" strokeWidth={2} dot={false} isAnimationActive={false} 
+                      />
+                      <ReferenceDot 
+                        x={currentPoint.i} y={currentPoint.phi} r={5} fill="#ef4444" stroke="#fff" strokeWidth={2} isAnimationActive={false}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-2 text-[10px] text-slate-500 flex flex-col gap-1 bg-slate-50 p-2 rounded-md">
+                  <div className="flex items-start gap-1.5">
+                    <span className="shrink-0 text-blue-500 font-bold">ℹ</span>
+                    <span><strong>Φs (饱和磁通)</strong>: 铁芯开始进入饱和状态的临界点。越过此点后，导磁率骤降，电流急剧增加。</span>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className="shrink-0 text-blue-500 font-bold">ℹ</span>
+                    <span><strong>Φp (峰值磁通)</strong>: 暂态过程中磁通达到的最大峰值。</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-5 flex flex-col gap-2 md:gap-3 min-h-0">
+              <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col min-h-0">
+                <h2 className="text-sm font-semibold mb-1 text-slate-800">暂态磁通波形</h2>
+                <div className="flex-1 min-h-0 w-full mt-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={currentData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="t" type="number" domain={[0, maxTime]} tickFormatter={formatTime} tick={{ fontSize: 10 }} />
+                      <YAxis domain={[-3, 3]} tick={{ fontSize: 10 }} />
+                      <Tooltip 
+                        labelFormatter={formatTime} 
+                        contentStyle={{ fontSize: '10px', padding: '4px 8px', borderRadius: '6px', backgroundColor: 'rgba(255, 255, 255, 0.85)' }}
+                        itemStyle={{ padding: 0, margin: 0 }}
+                      />
+                      <Legend verticalAlign="top" height={24} iconType="plainline" wrapperStyle={{ fontSize: '11px' }} />
+                      <ReferenceLine y={0} stroke="#cbd5e1" />
+                      
+                      <ReferenceLine y={PHI_S} stroke="#fca5a5" strokeDasharray="3 3" label={{ value: 'Φs', position: 'insideBottomLeft', fill: '#ef4444', fontSize: 12 }} />
+                      <ReferenceLine y={phi_p} stroke="#93c5fd" strokeDasharray="3 3" label={{ value: 'Φp', position: 'insideTopRight', fill: '#3b82f6', fontSize: 12 }} />
+                      
+                      <Line type="monotone" dataKey="phiSteady" name="周期分量 (稳态)" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 4" dot={false} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="phiTransient" name="非周期分量 (衰减)" stroke="#000000" strokeWidth={1.5} strokeDasharray="4 4" dot={false} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="phi" name="叠加磁通 (总磁通)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      
+                      <ReferenceDot x={0} y={phiRes} r={4} fill="#ef4444" stroke="#fff" strokeWidth={1} label={{ value: 'Φr', position: 'right', dx: 5, dy: 10, fill: '#ef4444', fontSize: 12, fontWeight: 'bold' }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col min-h-0">
+                <div className="flex justify-between items-center mb-1 flex-none">
+                  <h2 className="text-sm font-semibold text-slate-800">
+                    {showFFT ? '励磁涌流频谱分析 (FFT)' : '励磁涌流波形'}
+                  </h2>
+                  <button
+                    onClick={() => setShowFFT(!showFFT)}
+                    className="text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
+                  >
+                    切换为 {showFFT ? '时域波形' : '频域(FFT)'}
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0 w-full mt-1">
+                  {showFFT ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={harmonicsData} margin={{ top: 15, right: 10, left: -20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} tickFormatter={(val) => Number(val).toFixed(1).replace(/\.0$/, '')} />
+                        <Tooltip 
+                          cursor={{ fill: '#f1f5f9' }} 
+                          formatter={(value) => Number(value).toFixed(3)} 
+                          contentStyle={{ fontSize: '10px', padding: '4px 8px', borderRadius: '6px', backgroundColor: 'rgba(255, 255, 255, 0.85)' }}
+                          itemStyle={{ padding: 0, margin: 0 }}
+                        />
+                        <Bar dataKey="amplitude" name="幅值" radius={[2, 2, 0, 0]}>
+                          {harmonicsData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={index === 0 ? '#f59e0b' : index === 1 ? '#10b981' : index === 2 ? '#ef4444' : '#3b82f6'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={currentData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="t" type="number" domain={[0, maxTime]} tickFormatter={formatTime} tick={{ fontSize: 10 }} />
+                        <YAxis domain={[-10, 10]} tick={{ fontSize: 10 }} tickFormatter={(val) => Number(val).toFixed(1).replace(/\.0$/, '')} />
+                        <Tooltip 
+                          labelFormatter={formatTime} 
+                          contentStyle={{ fontSize: '10px', padding: '4px 8px', borderRadius: '6px', backgroundColor: 'rgba(255, 255, 255, 0.85)' }}
+                          itemStyle={{ padding: 0, margin: 0 }}
+                        />
+                        <Legend verticalAlign="top" height={24} iconType="plainline" wrapperStyle={{ fontSize: '11px' }} />
+                        <ReferenceLine y={0} stroke="#cbd5e1" />
+                        
+                        <ReferenceLine y={I_S} stroke="#fca5a5" strokeDasharray="3 3" label={{ value: 'is', position: 'insideTopLeft', fill: '#ef4444', fontSize: 12 }} />
+                        <ReferenceLine y={i_p} stroke="#93c5fd" strokeDasharray="3 3" label={{ value: 'ip', position: 'insideTopLeft', fill: '#3b82f6', fontSize: 12 }} />
+
+                        <Line type="monotone" dataKey="i" name="励磁电流 i" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
