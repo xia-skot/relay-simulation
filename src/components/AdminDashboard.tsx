@@ -59,6 +59,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState | null>(null);
+  const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
 
   // 1. Invite Codes State
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
@@ -93,7 +94,14 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
   // Load data on mount or tab change
   const loadAllData = async () => {
     setLoading(true);
+    setDbStatus('checking');
     try {
+      // Check database connection health
+      fetch('/api/health')
+        .then(res => res.json())
+        .then(data => setDbStatus(data.mongo === 'connected' ? 'connected' : 'disconnected'))
+        .catch(() => setDbStatus('disconnected'));
+
       const [uRes, aRes, iRes, pRes, oRes] = await Promise.all([
         apiGetAdminUsers(),
         apiGetAdmins(),
@@ -331,6 +339,19 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                 <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[11px] font-semibold">
                   管理员专属
                 </span>
+                {dbStatus === 'connected' ? (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold flex items-center gap-1 border border-emerald-500/30 ml-2">
+                    <CheckCircle2 size={10} /> 数据库已连接
+                  </span>
+                ) : dbStatus === 'disconnected' ? (
+                  <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 text-[11px] font-semibold flex items-center gap-1 border border-red-500/30 ml-2">
+                    <AlertTriangle size={10} /> 数据库未连接
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-300 text-[11px] font-semibold flex items-center gap-1 border border-slate-500/30 ml-2 animate-pulse">
+                    <RefreshCw size={10} className="animate-spin" /> 检测中
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400">
                 当前登录：<span className="text-slate-200 font-mono">{currentEmail}</span>
