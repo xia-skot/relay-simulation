@@ -2,5 +2,5 @@
   "name": "继电保护可视化交互演示平台",
   "description": "集成电力系统振荡、变压器涌流、高频保护、接线方式及3D继电器模型的综合教学仿真平台",
   "requestFramePermissions": ["fullscreen"],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

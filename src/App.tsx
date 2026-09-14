@@ -11,11 +11,17 @@ import {
   X,
   Play,
   ChevronDown,
-  GraduationCap,
   Home,
-  LineChart
+  LineChart,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { cn } from './lib/utils';
+import Logo from './components/Logo';
+import AuthModal from './components/AuthModal';
+import { getCurrentUser, setCurrentUser } from './lib/authStore';
+import { UserAccount } from './types/auth';
+import AdminDashboard from './components/AdminDashboard';
 
 // Import modules
 import IframeSandbox from './components/IframeSandbox';
@@ -41,11 +47,18 @@ const MODULES = [
 ];
 
 export default function App() {
+  const [currentUser, setCurrentUserState] = useState<UserAccount | null>(() => getCurrentUser());
   const [activeModule, setActiveModule] = useState('curve');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   const [iframeBgColor, setIframeBgColor] = useState('transparent');
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const isAdmin = Boolean(
+    currentUser?.role === 'admin' || 
+    currentUser?.email?.toLowerCase() === 'skot_catan@163.com'
+  );
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -65,6 +78,12 @@ export default function App() {
     setIframeBgColor('transparent');
   }, [activeModule]);
 
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setCurrentUserState(null);
+    setHasStarted(false);
+  };
+
   const startDemo = () => {
     if (document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen().catch(err => {
@@ -74,18 +93,61 @@ export default function App() {
     setHasStarted(true);
   };
 
+  // If not authenticated, render login / register / forgot password view
+  if (!currentUser) {
+    return <AuthModal onSuccess={(user) => setCurrentUserState(user)} />;
+  }
+
   if (!hasStarted) {
     return (
-      <div className="w-screen h-screen bg-slate-50 flex items-center justify-center font-sans p-4">
-        <div className="max-w-2xl w-full mx-auto px-6 py-12 bg-white rounded-3xl shadow-xl border border-slate-100 flex flex-col items-center">
-          <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mb-6">
-            <GraduationCap className="w-8 h-8 text-blue-600" />
+      <div className="w-screen h-screen bg-slate-50 flex items-center justify-center font-sans p-4 relative">
+        {/* Top-right user badge */}
+        <div className="absolute top-6 right-6 flex items-center gap-3 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm text-sm">
+          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
+            <UserIcon size={16} />
           </div>
-          <h1 className="text-3xl md:text-3xl font-black text-slate-900 tracking-tight text-center mb-4">
-            继电保护<br/>可视化交互演示平台
+          <div className="flex flex-col text-left">
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-slate-800 leading-tight">
+                {currentUser.name || '已登录用户'}
+              </span>
+              {isAdmin && (
+                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-full">
+                  管理员
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] text-slate-400">{currentUser.email}</span>
+          </div>
+
+          {isAdmin && (
+            <button
+              onClick={() => setShowAdminDashboard(true)}
+              className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-full text-xs font-semibold shadow-sm transition-all cursor-pointer ml-1"
+            >
+              <ShieldCheck size={14} />
+              <span>管理后台</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleLogout}
+            title="退出登录"
+            className="ml-1 p-1.5 text-slate-400 hover:text-red-500 rounded-lg transition-colors cursor-pointer"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
+
+        <div className="max-w-2xl w-full mx-auto px-6 py-12 bg-white rounded-3xl shadow-xl border border-slate-100 flex flex-col items-center">
+          <div className="w-16 h-16 flex items-center justify-center mb-5">
+            <Logo className="w-16 h-16 drop-shadow-md" />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight text-center mb-4 whitespace-nowrap">
+            继电保护可视化交互演示平台
           </h1>
           <p className="text-slate-500 mb-10 text-center max-w-lg">
-            选择一个功能模块进行交互式虚拟仿真与学习演示。
+            欢迎回来，<span className="font-semibold text-slate-800">{currentUser.name || currentUser.email}</span>！请选择教学模块进行交互式虚拟仿真与学习演示。
           </p>
 
           <div className="w-full max-w-md space-y-6">
@@ -109,7 +171,7 @@ export default function App() {
 
             <button
               onClick={startDemo}
-              className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-lg shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+              className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-lg shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
             >
               <Play size={20} className="fill-current" />
               开始演示
@@ -121,33 +183,55 @@ export default function App() {
   }
 
   return (
-    <div className="w-screen h-screen flex bg-black overflow-hidden font-sans">
+    <div className="w-screen h-screen flex bg-slate-50 overflow-hidden font-sans">
       
       {/* Left Thin Sidebar */}
       <div 
         className={cn(
-          "w-16 h-full flex flex-col items-center py-4 shrink-0 relative z-50 border-r transition-colors duration-300",
+          "w-16 h-full flex flex-col items-center py-4 shrink-0 relative z-50 border-r transition-colors duration-300 justify-between",
           activeModule === '3d' 
             ? "bg-slate-900 border-slate-800" 
-            : "bg-slate-50 border-slate-200"
+            : "bg-white border-slate-200"
         )}
       >
-        <button
-          onClick={() => setHasStarted(false)}
-          className="p-3 mb-3 rounded-xl shadow-sm transition-all flex items-center justify-center bg-blue-500 text-white hover:bg-blue-600"
-          title="回主页"
-        >
-          <Home size={24} />
-        </button>
+        <div className="flex flex-col items-center gap-3">
+          <button
+            onClick={() => setHasStarted(false)}
+            className="p-3 rounded-xl shadow-sm transition-all flex items-center justify-center bg-blue-500 text-white hover:bg-blue-600"
+            title="回主页"
+          >
+            <Home size={24} />
+          </button>
 
-        <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className={cn(
-            "p-3 rounded-xl shadow-sm transition-all flex items-center justify-center",
-            isMenuOpen ? "bg-red-500 hover:bg-red-600 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className={cn(
+              "p-3 rounded-xl shadow-sm transition-all flex items-center justify-center",
+              isMenuOpen ? "bg-red-500 hover:bg-red-600 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"
+            )}
+            title="功能列表"
+          >
+            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+
+          {isAdmin && (
+            <button
+              onClick={() => setShowAdminDashboard(true)}
+              className="p-3 rounded-xl shadow-sm transition-all flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+              title="管理员后台"
+            >
+              <ShieldCheck size={24} />
+            </button>
           )}
+        </div>
+
+        {/* User logout button at bottom of sidebar */}
+        <button
+          onClick={handleLogout}
+          title={`退出登录 (${currentUser.name || currentUser.email})`}
+          className="p-3 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
         >
-          {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          <LogOut size={20} />
         </button>
 
         {/* Dropdown Menu */}
@@ -161,9 +245,11 @@ export default function App() {
               transition={{ duration: 0.15 }}
               className="absolute top-4 left-20 w-80 bg-white/95 backdrop-blur-md border border-slate-200 shadow-2xl rounded-2xl overflow-hidden py-2"
             >
-              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
-                <h3 className="font-bold text-slate-800 tracking-tight">继保原理仿真功能列表</h3>
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">选择教学模块</p>
+              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-800 tracking-tight">继保原理仿真功能列表</h3>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">选择教学模块</p>
+                </div>
               </div>
               <nav className="flex flex-col p-2 space-y-1 max-h-[70vh] overflow-y-auto">
                 {MODULES.map((mod) => (
@@ -209,6 +295,14 @@ export default function App() {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Admin Dashboard Overlay Modal */}
+      {showAdminDashboard && (
+        <AdminDashboard
+          currentEmail={currentUser.email}
+          onClose={() => setShowAdminDashboard(false)}
+        />
+      )}
 
     </div>
   );

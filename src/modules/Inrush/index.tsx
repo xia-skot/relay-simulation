@@ -10,7 +10,8 @@ import {
   Play, 
   Pause, 
   RotateCcw,
-  Info 
+  Info,
+  Settings2
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -219,7 +220,7 @@ export default function InrushModule() {
                 <ReferenceLine x={0} stroke="#cbd5e1" />
                 <ReferenceLine y={0} stroke="#cbd5e1" />
                 <Line data={phiICurveData} dataKey="phi" type="monotone" stroke="#94a3b8" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <ReferenceDot x={currentPoint.i} y={currentPoint.phi} r={6} fill="#ef4444" stroke="#fff" strokeWidth={2} isAnimationActive={false} />
+                <ReferenceDot x={currentPoint.i} y={currentPoint.phi} r={6} fill="#ef4444" stroke="#fff" strokeWidth={2} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>

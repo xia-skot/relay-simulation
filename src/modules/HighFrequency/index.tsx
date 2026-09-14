@@ -6,8 +6,10 @@ import {
   ShieldCheck, 
   Activity,
   ArrowRight,
-  Info 
+  Info,
+  Settings2
 } from 'lucide-react';
+import { motion } from 'motion/react';
 import { cn } from '../../lib/utils';
 
 const LOGIC_STEPS = [
