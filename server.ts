@@ -6,8 +6,8 @@ import nodemailer from 'nodemailer';
 
 const PORT = 3000;
 const app = express();
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // MongoDB configuration
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://skot:mongodb2XYX@cluster0.zdeic8f.mongodb.net/?appName=Cluster0';
@@ -855,6 +855,7 @@ app.post('/api/payment/config', async (req, res) => {
 
     res.json({ success: true, message: '收款配置已更新并实时生效', config: updated });
   } catch (err: any) {
+    console.error('Update payment config error:', err);
     res.status(500).json({ success: false, message: '更新收款配置失败' });
   }
 });

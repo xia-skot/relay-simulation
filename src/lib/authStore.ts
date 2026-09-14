@@ -350,9 +350,22 @@ export async function apiUpdatePaymentConfig(config: any): Promise<{ success: bo
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
     });
-    return await res.json();
+    
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      if (!res.ok) {
+        return { success: false, message: data.message || '更新收款配置失败' };
+      }
+      return data;
+    } catch {
+      if (res.status === 413) {
+        return { success: false, message: '上传的图片尺寸过大，请压缩后重试 (不得超过 50MB)' };
+      }
+      return { success: false, message: `服务器错误 (${res.status}): 更新失败` };
+    }
   } catch (err: any) {
-    return { success: false, message: '更新收款配置失败' };
+    return { success: false, message: '更新收款配置失败: 网络异常' };
   }
 }
 
