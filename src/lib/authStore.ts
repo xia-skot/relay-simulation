@@ -1,8 +1,7 @@
 import { UserAccount } from '../types/auth';
-import { getWechatQrCodeUrl, getAlipayQrCodeUrl } from './qrGenerator';
 
 const STORAGE_CURRENT_USER_KEY = 'relay_platform_current_user_v1';
-const STORAGE_USERS_CACHE_KEY = 'relay_platform_users_cache_v2';
+const STORAGE_USERS_CACHE_KEY = 'relay_platform_users_cache_v1';
 
 interface CachedUser {
   email: string;
@@ -13,19 +12,10 @@ interface CachedUser {
 }
 
 const DEFAULT_USERS: CachedUser[] = [
-  { email: '651412826@qq.com', password: 'jdbh2@XYX', name: '夏翊翔', role: 'admin' },
-  { email: 'skot_catan@163.com', password: 'admin123', name: '系统超级管理员', role: 'admin' },
-  { email: 'admin@relay.com', password: 'password123', name: '示范管理员', role: 'admin' },
+  { email: '651412826@qq.com', password: 'jdbh2@XYX', name: '夏翊翔', role: 'user' },
+  { email: 'skot_catan@163.com', password: 'password123', name: '系统超级管理员', role: 'admin' },
+  { email: 'admin@relay.com', password: 'password123', name: '示范学员', role: 'user' },
 ];
-
-function isKnownAdminEmail(email: string): boolean {
-  const norm = email.trim().toLowerCase();
-  return (
-    norm === 'skot_catan@163.com' ||
-    norm === '651412826@qq.com' ||
-    norm === 'admin@relay.com'
-  );
-}
 
 function getLocalUsersCache(): CachedUser[] {
   try {
@@ -144,19 +134,12 @@ export async function apiLogin(email: string, password: string): Promise<{ succe
 
     // If server returned non-JSON (e.g. 502/404 HTML during redeployment or cold start)
     const cached = findUserInLocalCache(normEmail);
-    const isAdmin = isKnownAdminEmail(normEmail) || (cached && cached.role === 'admin');
-
     if (cached) {
-      let isPwValid = (cached.password === password);
-      if (!isPwValid && isAdmin && (password === 'admin123' || password === 'password123' || password === 'jdbh2@XYX')) {
-        isPwValid = true;
-      }
-
-      if (isPwValid) {
+      if (cached.password === password) {
         const fallbackUser: UserAccount = {
           email: cached.email,
-          name: cached.name || (isAdmin ? '管理员' : '学员'),
-          role: isAdmin ? 'admin' : (cached.role || 'user'),
+          name: cached.name || '学员',
+          role: cached.role || 'user',
           inviteCodeUsed: cached.inviteCodeUsed,
         };
         setCurrentUser(fallbackUser);
@@ -172,19 +155,12 @@ export async function apiLogin(email: string, password: string): Promise<{ succe
 
     // Resilient offline / local fallback
     const cached = findUserInLocalCache(normEmail);
-    const isAdmin = isKnownAdminEmail(normEmail) || (cached && cached.role === 'admin');
-
     if (cached) {
-      let isPwValid = (cached.password === password);
-      if (!isPwValid && isAdmin && (password === 'admin123' || password === 'password123' || password === 'jdbh2@XYX')) {
-        isPwValid = true;
-      }
-
-      if (isPwValid) {
+      if (cached.password === password) {
         const fallbackUser: UserAccount = {
           email: cached.email,
-          name: cached.name || (isAdmin ? '管理员' : '学员'),
-          role: isAdmin ? 'admin' : (cached.role || 'user'),
+          name: cached.name || '学员',
+          role: cached.role || 'user',
           inviteCodeUsed: cached.inviteCodeUsed,
         };
         setCurrentUser(fallbackUser);
@@ -195,8 +171,8 @@ export async function apiLogin(email: string, password: string): Promise<{ succe
     }
 
     // Default demo student account
-    if (normEmail === 'admin@relay.com' && (password === 'password123' || password === 'admin123')) {
-      const demoUser: UserAccount = { email: 'admin@relay.com', name: '示范管理员', role: 'admin' };
+    if (normEmail === 'admin@relay.com' && password === 'password123') {
+      const demoUser: UserAccount = { email: 'admin@relay.com', name: '示范学员', role: 'user' };
       setCurrentUser(demoUser);
       return { success: true, message: '登录成功', user: demoUser };
     }
@@ -361,45 +337,9 @@ export async function apiDeleteOrder(orderId: string): Promise<{ success: boolea
 export async function apiGetPaymentConfig(): Promise<{ success: boolean; config?: any; message?: string }> {
   try {
     const res = await fetch('/api/payment/config');
-    const data = await res.json();
-    if (data.success && data.config) {
-      if (!data.config.wechatQr) {
-        data.config.wechatQr = await getWechatQrCodeUrl(data.config.price || 9.9);
-      }
-      if (!data.config.alipayQr) {
-        data.config.alipayQr = await getAlipayQrCodeUrl(data.config.price || 9.9);
-      }
-      return data;
-    }
-    const [wechatQr, alipayQr] = await Promise.all([
-      getWechatQrCodeUrl(9.9),
-      getAlipayQrCodeUrl(9.9),
-    ]);
-    return {
-      success: true,
-      config: {
-        price: 9.9,
-        wechatQr,
-        alipayQr,
-        instruction: '微信/支付宝扫码支付后，点击下方【我已完成支付】即可自动出码并自动填入。',
-        autoIssue: true,
-      },
-    };
+    return await res.json();
   } catch (err: any) {
-    const [wechatQr, alipayQr] = await Promise.all([
-      getWechatQrCodeUrl(9.9),
-      getAlipayQrCodeUrl(9.9),
-    ]);
-    return {
-      success: true,
-      config: {
-        price: 9.9,
-        wechatQr,
-        alipayQr,
-        instruction: '微信/支付宝扫码支付后，点击下方【我已完成支付】即可自动出码并自动填入。',
-        autoIssue: true,
-      },
-    };
+    return { success: false, message: '获取收款配置失败' };
   }
 }
 

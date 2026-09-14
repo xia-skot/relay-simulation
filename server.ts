@@ -3,7 +3,6 @@ import path from 'path';
 import fs from 'fs';
 import { MongoClient, ObjectId } from 'mongodb';
 import nodemailer from 'nodemailer';
-import QRCode from 'qrcode';
 
 const PORT = 3000;
 const app = express();
@@ -121,24 +120,15 @@ function generateUniqueCodeString(): string {
   return `RP-${s1}-${s2}`;
 }
 
-const ADMIN_WHITELIST = new Set([
-  'skot_catan@163.com',
-  '651412826@qq.com',
-  'admin@relay.com',
-  SUPER_ADMIN_EMAIL.toLowerCase(),
-]);
-
 async function checkIsAdmin(email: string): Promise<boolean> {
   if (!email) return false;
   const norm = email.trim().toLowerCase();
-  if (ADMIN_WHITELIST.has(norm)) return true;
+  if (norm === SUPER_ADMIN_EMAIL.toLowerCase()) return true;
   if (memoryAdmins.has(norm)) return true;
   try {
     const db = await getDb();
-    const foundAdmin = await db.collection('admins').findOne({ email: norm });
-    if (foundAdmin) return true;
-    const foundUser = await db.collection('users').findOne({ email: norm, role: 'admin' });
-    if (foundUser) return true;
+    const found = await db.collection('admins').findOne({ email: norm });
+    if (found) return true;
   } catch (err) {
     // fallback
   }
@@ -405,26 +395,20 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
-    // If default demo student account
+    // If default demo admin account
     if (!foundUser && normalizedEmail === 'admin@relay.com' && password === 'password123') {
-      foundUser = { email: 'admin@relay.com', name: '示范学员', role: 'user' };
+      foundUser = { email: 'admin@relay.com', name: '平台管理员', role: 'admin' };
     }
 
     if (!foundUser) {
       return res.status(400).json({ success: false, message: '该账号尚未注册，请先点击注册' });
     }
 
-    const isAdminUser = await checkIsAdmin(normalizedEmail);
-
-    let passwordValid = (foundUser.password === password);
-    if (!passwordValid && isAdminUser && (password === 'admin123' || password === 'password123' || password === 'jdbh2@XYX')) {
-      passwordValid = true;
-    }
-
-    if (foundUser.password && !passwordValid) {
+    if (foundUser.password && foundUser.password !== password) {
       return res.status(400).json({ success: false, message: '密码错误，请核对或点击忘记密码' });
     }
 
+    const isAdminUser = await checkIsAdmin(normalizedEmail);
     const effectiveRole = (isAdminUser || foundUser.role === 'admin') ? 'admin' : 'user';
 
     res.json({
@@ -745,88 +729,99 @@ app.post('/api/invite-codes/batch-delete', async (req, res) => {
   }
 });
 
-async function ensureDefaultQrCodes(price: number = 9.9) {
-  let wechatQr = '';
-  let alipayQr = '';
-  try {
-    wechatQr = await QRCode.toDataURL(`wxp://f2f0_relay_platform_pay_${price.toFixed(2)}_invite_code`, {
-      errorCorrectionLevel: 'H',
-      margin: 1,
-      width: 320,
-      color: { dark: '#07C160', light: '#FFFFFF' }
-    });
-  } catch {}
-  try {
-    alipayQr = await QRCode.toDataURL(`https://qr.alipay.com/bax0_relay_platform_pay_${price.toFixed(2)}_invite_code`, {
-      errorCorrectionLevel: 'H',
-      margin: 1,
-      width: 320,
-      color: { dark: '#1677FF', light: '#FFFFFF' }
-    });
-  } catch {}
-  return { wechatQr, alipayQr };
-}
-
 let hasLoadedPaymentConfigFromDb = false;
 async function warmPaymentConfig() {
   try {
-    const defaults = await ensureDefaultQrCodes(memoryPaymentConfig.price);
-    if (!memoryPaymentConfig.wechatQr) memoryPaymentConfig.wechatQr = defaults.wechatQr;
-    if (!memoryPaymentConfig.alipayQr) memoryPaymentConfig.alipayQr = defaults.alipayQr;
-
     const db = await getDb();
     const found = await db.collection('payment_config').findOne({ type: 'default' });
     if (found) {
       memoryPaymentConfig = {
         price: found.price ?? memoryPaymentConfig.price,
-        wechatQr: found.wechatQr || defaults.wechatQr,
-        alipayQr: found.alipayQr || defaults.alipayQr,
+        wechatQr: found.wechatQr || '',
+        alipayQr: found.alipayQr || '',
         instruction: found.instruction || memoryPaymentConfig.instruction,
         autoIssue: found.autoIssue ?? true,
       };
       hasLoadedPaymentConfigFromDb = true;
-    } else {
-      // Seed default payment config into database
-      await db.collection('payment_config').updateOne(
-        { type: 'default' },
-        { $set: { ...memoryPaymentConfig, type: 'default', updatedAt: new Date().toISOString() } },
-        { upsert: true }
-      );
-      hasLoadedPaymentConfigFromDb = true;
     }
-  } catch (err) {
-    console.error('warmPaymentConfig error:', err);
-  }
+  } catch {}
 }
 warmPaymentConfig();
+
+// Seed admins into database
+async function seedAdminUsers() {
+  try {
+    const db = await getDb();
+    
+    // 1. Seed super admin
+    const superAdmin = SUPER_ADMIN_EMAIL.toLowerCase();
+    const existingSuper = await db.collection('users').findOne({ email: superAdmin });
+    if (!existingSuper) {
+      await db.collection('users').insertOne({
+        email: superAdmin,
+        name: '系统超级管理员',
+        role: 'admin',
+        password: 'password123',
+        createdAt: new Date()
+      });
+    } else if (existingSuper.role !== 'admin') {
+      await db.collection('users').updateOne({ email: superAdmin }, { $set: { role: 'admin' } });
+    }
+    await db.collection('admins').updateOne(
+      { email: superAdmin },
+      { $set: { email: superAdmin, addedAt: new Date().toISOString(), isSuperAdmin: true, addedBy: 'System' } },
+      { upsert: true }
+    );
+
+    // 2. Seed default platform admin
+    const defaultAdmin = 'admin@relay.com';
+    const existingDefault = await db.collection('users').findOne({ email: defaultAdmin });
+    if (!existingDefault) {
+      await db.collection('users').insertOne({
+        email: defaultAdmin,
+        name: '平台管理员',
+        role: 'admin',
+        password: 'password123',
+        createdAt: new Date()
+      });
+    } else if (existingDefault.role !== 'admin') {
+      await db.collection('users').updateOne({ email: defaultAdmin }, { $set: { role: 'admin' } });
+    }
+    await db.collection('admins').updateOne(
+      { email: defaultAdmin },
+      { $set: { email: defaultAdmin, addedAt: new Date().toISOString(), isSuperAdmin: false, addedBy: 'System' } },
+      { upsert: true }
+    );
+  } catch (err) {
+    console.warn('MongoDB not ready for seeding admin users', err);
+  }
+}
+seedAdminUsers();
 
 // 12. Get payment & QR configuration
 app.get('/api/payment/config', async (req, res) => {
   try {
-    if (hasLoadedPaymentConfigFromDb && memoryPaymentConfig.wechatQr && memoryPaymentConfig.alipayQr) {
+    if (hasLoadedPaymentConfigFromDb) {
       return res.json({ success: true, config: memoryPaymentConfig });
     }
-    
-    const defaults = await ensureDefaultQrCodes(memoryPaymentConfig.price);
-    if (!memoryPaymentConfig.wechatQr) memoryPaymentConfig.wechatQr = defaults.wechatQr;
-    if (!memoryPaymentConfig.alipayQr) memoryPaymentConfig.alipayQr = defaults.alipayQr;
-
+    let config = memoryPaymentConfig;
     try {
       const db = await getDb();
       const found = await db.collection('payment_config').findOne({ type: 'default' });
       if (found) {
-        memoryPaymentConfig = {
+        config = {
           price: found.price ?? memoryPaymentConfig.price,
-          wechatQr: found.wechatQr || defaults.wechatQr,
-          alipayQr: found.alipayQr || defaults.alipayQr,
+          wechatQr: found.wechatQr || '',
+          alipayQr: found.alipayQr || '',
           instruction: found.instruction || memoryPaymentConfig.instruction,
           autoIssue: found.autoIssue ?? true,
         };
+        memoryPaymentConfig = config;
         hasLoadedPaymentConfigFromDb = true;
       }
     } catch {}
 
-    res.json({ success: true, config: memoryPaymentConfig });
+    res.json({ success: true, config });
   } catch (err: any) {
     res.status(500).json({ success: false, message: '获取收款配置失败' });
   }

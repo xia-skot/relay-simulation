@@ -57,9 +57,7 @@ export default function App() {
 
   const isAdmin = Boolean(
     currentUser?.role === 'admin' || 
-    currentUser?.email?.toLowerCase() === 'skot_catan@163.com' ||
-    currentUser?.email?.toLowerCase() === '651412826@qq.com' ||
-    currentUser?.email?.toLowerCase() === 'admin@relay.com'
+    currentUser?.email?.toLowerCase() === 'skot_catan@163.com'
   );
 
   // Close menu when clicking outside

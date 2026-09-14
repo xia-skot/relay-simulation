@@ -12,7 +12,6 @@ import {
   EyeOff, 
   KeyRound, 
   Shield, 
-  ShieldCheck,
   Sparkles,
   Zap,
   SendHorizontal,
@@ -359,40 +358,6 @@ export default function AuthModal({ onSuccess }: AuthModalProps) {
               {loading ? '正在验证登录...' : '登 录 平 台'}
               <ArrowRight size={16} />
             </button>
-
-            {/* Quick Admin fill options */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-              <span className="flex items-center gap-1">
-                <ShieldCheck size={14} className="text-blue-500" />
-                <span>快捷填入：</span>
-              </span>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('skot_catan@163.com');
-                    setPassword('admin123');
-                    setErrorMsg('');
-                  }}
-                  className="text-[11px] text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg font-medium transition-colors cursor-pointer"
-                  title="填入超级管理员账号并准备登录"
-                >
-                  超级管理员
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('651412826@qq.com');
-                    setPassword('jdbh2@XYX');
-                    setErrorMsg('');
-                  }}
-                  className="text-[11px] text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg font-medium transition-colors cursor-pointer"
-                  title="填入您的QQ邮箱账号"
-                >
-                  QQ邮箱
-                </button>
-              </div>
-            </div>
           </form>
         )}
 

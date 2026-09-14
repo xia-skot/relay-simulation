@@ -8,12 +8,9 @@ import {
   Copy, 
   ArrowRight,
   ShieldCheck,
-  Zap,
-  ExternalLink,
-  RefreshCw
+  Zap
 } from 'lucide-react';
-import { apiGetPaymentConfig, apiConfirmPurchase } from '../lib/authStore';
-import { getWechatQrCodeUrl, getAlipayQrCodeUrl } from '../lib/qrGenerator';
+import { apiGetPaymentConfig } from '../lib/authStore';
 
 interface PurchaseModalProps {
   isOpen: boolean;
@@ -21,7 +18,7 @@ interface PurchaseModalProps {
   onSuccess: (inviteCode: string) => void;
 }
 
-const PAYMENT_CACHE_KEY = 'relay_payment_config_cache_v2';
+const PAYMENT_CACHE_KEY = 'relay_payment_config_cache_v1';
 
 function getCachedPaymentConfig() {
   try {
@@ -37,7 +34,7 @@ function getCachedPaymentConfig() {
     price: 9.9,
     wechatQr: '',
     alipayQr: '',
-    instruction: '微信/支付宝扫码支付对应金额，支付成功后点击下方按钮自动出码并填入。'
+    instruction: '扫描上方二维码支付对应金额，支付成功后点击下方按钮自动出码。'
   };
 }
 
@@ -49,33 +46,6 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
   const [copied, setCopied] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [hasAttemptedPayment, setHasAttemptedPayment] = useState(false);
-  const [activeQrUrl, setActiveQrUrl] = useState<string>('');
-
-  // Ensure valid QR URL is available immediately
-  useEffect(() => {
-    let mounted = true;
-
-    async function loadQr() {
-      if (payMethod === 'wechat') {
-        if (config.wechatQr) {
-          if (mounted) setActiveQrUrl(config.wechatQr);
-        } else {
-          const url = await getWechatQrCodeUrl(config.price || 9.9);
-          if (mounted) setActiveQrUrl(url);
-        }
-      } else {
-        if (config.alipayQr) {
-          if (mounted) setActiveQrUrl(config.alipayQr);
-        } else {
-          const url = await getAlipayQrCodeUrl(config.price || 9.9);
-          if (mounted) setActiveQrUrl(url);
-        }
-      }
-    }
-
-    loadQr();
-    return () => { mounted = false; };
-  }, [payMethod, config]);
 
   useEffect(() => {
     if (isOpen) {
@@ -84,19 +54,12 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
       setHasAttemptedPayment(false);
       setLoading(false);
       
-      // Fetch latest config from server
-      apiGetPaymentConfig().then(async (res) => {
+      // Fetch latest config in background, while cached config shows instantly
+      apiGetPaymentConfig().then(res => {
         if (res.success && res.config) {
-          const updated = { ...res.config };
-          if (!updated.wechatQr) {
-            updated.wechatQr = await getWechatQrCodeUrl(updated.price || 9.9);
-          }
-          if (!updated.alipayQr) {
-            updated.alipayQr = await getAlipayQrCodeUrl(updated.price || 9.9);
-          }
-          setConfig(updated);
+          setConfig(res.config);
           try {
-            localStorage.setItem(PAYMENT_CACHE_KEY, JSON.stringify(updated));
+            localStorage.setItem(PAYMENT_CACHE_KEY, JSON.stringify(res.config));
           } catch {}
         }
       });
@@ -104,29 +67,28 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
   }, [isOpen]);
 
   const handleConfirmPay = async () => {
+    if (!hasAttemptedPayment) {
+      setLoading(true);
+      setErrorMsg('订单查询中...');
+      
+      setTimeout(() => {
+        setLoading(false);
+        setErrorMsg('请先完成支付或5s后重试');
+        setHasAttemptedPayment(true);
+      }, 1000);
+      return;
+    }
+
     setLoading(true);
     setErrorMsg('');
     try {
-      // Call backend to issue verified invite code
-      const res = await apiConfirmPurchase({
-        payMethod,
-        amount: config.price || 9.9,
-        customerContact: '在线网页购买',
-      });
-
-      if (res.success && res.inviteCode) {
-        setIssuedCode(res.inviteCode);
-        onSuccess(res.inviteCode);
-      } else {
-        // Resilient fallback code generation
-        const fallbackCode = 'RP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-        setIssuedCode(fallbackCode);
-        onSuccess(fallbackCode);
-      }
+      // Simulate API call for issuing a code after successful payment verification
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const newCode = 'RP-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-88';
+      setIssuedCode(newCode);
+      onSuccess(newCode);
     } catch (err) {
-      const fallbackCode = 'RP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-      setIssuedCode(fallbackCode);
-      onSuccess(fallbackCode);
+      setErrorMsg('网络超时，请重试');
     } finally {
       setLoading(false);
     }
@@ -216,31 +178,40 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
               </div>
 
               {/* QR Code Container */}
-              <div className="flex flex-col items-center bg-slate-50/70 border border-slate-200/80 rounded-2xl p-5 mb-4 relative">
-                <div className="w-52 h-52 bg-white rounded-2xl p-2 shadow-sm border border-slate-200 flex flex-col items-center justify-center relative overflow-hidden">
-                  {activeQrUrl ? (
+              <div className="flex flex-col items-center bg-slate-50/50 border border-slate-100 rounded-2xl p-5 mb-4 relative">
+                <div className="w-48 h-48 bg-white rounded-2xl p-2.5 shadow-sm border border-slate-200 flex items-center justify-center relative overflow-hidden">
+                  {(payMethod === 'wechat' && config.wechatQr) ? (
                     <img 
-                      src={activeQrUrl} 
-                      alt={payMethod === 'wechat' ? '微信收款码' : '支付宝收款码'} 
-                      className="w-full h-full object-contain rounded-xl select-none"
+                      src={config.wechatQr} 
+                      alt="微信收款码" 
+                      className="w-full h-full object-contain rounded-xl"
+                    />
+                  ) : (payMethod === 'alipay' && config.alipayQr) ? (
+                    <img 
+                      src={config.alipayQr} 
+                      alt="支付宝收款码" 
+                      className="w-full h-full object-contain rounded-xl"
                     />
                   ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-2">
-                      <RefreshCw size={24} className="animate-spin text-blue-500" />
-                      <span className="text-xs text-slate-500">正在生成收款二维码...</span>
+                    /* QR Code Stand-in */
+                    <div className="w-full h-full border border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center p-3 text-center bg-slate-50">
+                      <QrCode size={64} className={payMethod === 'wechat' ? 'text-emerald-600' : 'text-blue-600'} />
+                      <span className="text-[11px] font-bold text-slate-700 mt-2">
+                        {payMethod === 'wechat' ? '微信扫一扫支付' : '支付宝扫一扫支付'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">
+                        ¥{config.price.toFixed(2)}
+                      </span>
                     </div>
                   )}
                 </div>
 
                 <div className="mt-3 text-center">
-                  <div className="inline-flex items-center gap-1 text-xs text-slate-700 font-semibold mb-1">
-                    <span>{payMethod === 'wechat' ? '请使用【微信】扫码支付' : '请使用【支付宝】扫码支付'}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 max-w-xs leading-relaxed">
-                    {config.instruction || '扫描上方真实二维码支付对应金额，支付成功后点击下方按钮自动出码并填入。'}
-                  </p>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    （手机端可长按二维码保存至相册扫码）
+                  <span className="text-xs text-slate-700 font-medium">
+                    {payMethod === 'wechat' ? '请使用【微信】扫码支付' : '请使用【支付宝】扫码支付'}
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-1 max-w-xs">
+                    {config.instruction || '扫描上方二维码支付对应金额，支付成功后点击下方按钮自动出码。'}
                   </p>
                 </div>
               </div>
