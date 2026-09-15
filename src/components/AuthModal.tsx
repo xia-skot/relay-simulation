@@ -91,7 +91,8 @@ export default function AuthModal({ onSuccess }: AuthModalProps) {
 
     if (res.success) {
       setCountdown(60);
-      setSuccessMsg(res.message || '验证码已发送至您的邮箱，请注意查收');
+      setErrorMsg('');
+      setSuccessMsg('');
       if (res.devCode) {
         setCode(res.devCode);
       }
