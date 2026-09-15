@@ -509,78 +509,77 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
   const isSomeUsersSelected = selectableUserEmails.some(e => selectedUserEmails.includes(e)) && !isAllUsersSelected;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-900/50 backdrop-blur-sm font-sans">
-      <div className="w-full max-w-5xl h-[92vh] bg-white border border-slate-200 rounded-3xl flex flex-col shadow-2xl overflow-hidden text-slate-800">
-        
-        {/* Top Navigation Bar - Light theme */}
-        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/90 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200 shadow-sm">
-              <ShieldCheck size={22} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-                  系统管理控制台
-                </h2>
-                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-semibold">
-                  管理员专属
-                </span>
-                {dbStatus === 'connected' ? (
-                  <button
-                    type="button"
-                    onClick={() => { checkDbHealth(); setShowDbModal(true); }}
-                    className="px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-semibold flex items-center gap-1.5 border border-emerald-200 transition-all cursor-pointer group shadow-sm"
-                    title="点击查看数据库连接自检详情"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>数据库已连接</span>
-                    {dbDiagnostics?.latencyMs !== undefined && (
-                      <span className="text-[10px] text-emerald-600 font-mono">({dbDiagnostics.latencyMs}ms)</span>
-                    )}
-                    <Info size={11} className="text-emerald-500 group-hover:text-emerald-700" />
-                  </button>
-                ) : dbStatus === 'disconnected' ? (
-                  <button
-                    type="button"
-                    onClick={() => { checkDbHealth(); setShowDbModal(true); }}
-                    className="px-2.5 py-1 rounded-full bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-semibold flex items-center gap-1.5 border border-red-200 transition-all cursor-pointer group shadow-sm"
-                    title="点击查看异常自检详情"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                    <span>数据库未连接</span>
-                    <Info size={11} className="text-red-500 group-hover:text-red-700" />
-                  </button>
-                ) : (
-                  <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[11px] font-semibold flex items-center gap-1.5 border border-slate-200 animate-pulse">
-                    <RefreshCw size={10} className="animate-spin text-blue-600" /> 数据库自检中
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-500">
-                当前登录账号：<span className="text-slate-800 font-mono font-medium">{currentEmail}</span>
-              </p>
-            </div>
+    <div className="w-full h-full flex flex-col overflow-hidden bg-white text-slate-800 font-sans">
+      {/* Top Navigation Bar - Light theme */}
+      <div className="px-6 py-3.5 border-b border-slate-200 bg-white flex items-center justify-between shrink-0 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200 shadow-xs">
+            <ShieldCheck size={20} />
           </div>
-
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={loadAllData}
-              disabled={loading}
-              title="刷新数据"
-              className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-sm transition-colors cursor-pointer"
-            >
-              <RefreshCw size={16} className={loading ? 'animate-spin text-blue-600' : ''} />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-xl bg-white hover:bg-red-50 hover:text-red-600 text-slate-600 border border-slate-200 shadow-sm transition-colors cursor-pointer"
-              title="退出管理后台"
-            >
-              <X size={18} />
-            </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                系统管理控制台
+              </h2>
+              <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-semibold">
+                管理员专属
+              </span>
+              {dbStatus === 'connected' ? (
+                <button
+                  type="button"
+                  onClick={() => { checkDbHealth(); setShowDbModal(true); }}
+                  className="px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-semibold flex items-center gap-1.5 border border-emerald-200 transition-all cursor-pointer group shadow-xs"
+                  title="点击查看数据库连接自检详情"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>数据库已连接</span>
+                  {dbDiagnostics?.latencyMs !== undefined && (
+                    <span className="text-[10px] text-emerald-600 font-mono">({dbDiagnostics.latencyMs}ms)</span>
+                  )}
+                  <Info size={11} className="text-emerald-500 group-hover:text-emerald-700" />
+                </button>
+              ) : dbStatus === 'disconnected' ? (
+                <button
+                  type="button"
+                  onClick={() => { checkDbHealth(); setShowDbModal(true); }}
+                  className="px-2.5 py-1 rounded-full bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-semibold flex items-center gap-1.5 border border-red-200 transition-all cursor-pointer group shadow-xs"
+                  title="点击查看异常自检详情"
+                >
+                  <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                  <span>数据库未连接</span>
+                  <Info size={11} className="text-red-500 group-hover:text-red-700" />
+                </button>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[11px] font-semibold flex items-center gap-1.5 border border-slate-200 animate-pulse">
+                  <RefreshCw size={10} className="animate-spin text-blue-600" /> 数据库自检中
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              当前登录账号：<span className="text-slate-800 font-mono font-medium">{currentEmail}</span>
+            </p>
           </div>
         </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadAllData}
+            disabled={loading}
+            title="刷新数据"
+            className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-xs transition-colors cursor-pointer"
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin text-blue-600' : ''} />
+          </button>
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 shadow-xs transition-colors cursor-pointer text-xs font-semibold"
+            title="返回仿真演示"
+          >
+            <X size={15} />
+            <span>返回仿真演示</span>
+          </button>
+        </div>
+      </div>
 
         {/* Global Toast Feedback */}
         {feedback && (
@@ -741,7 +740,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                         codeFilter === 'used' ? 'bg-slate-200 text-slate-800 font-bold' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      已失效/已使用 ({inviteCodes.filter(c => c.status === 'used').length})
+                      失效.已使用 ({inviteCodes.filter(c => c.status === 'used').length})
                     </button>
                   </div>
                 </div>
@@ -761,7 +760,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                     <button
                       type="button"
                       onClick={promptBatchDeleteUnused}
-                      className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                      className="px-3.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
                       title="快速清空所有未使用的邀请码"
                     >
                       <Trash2 size={13} />
@@ -799,7 +798,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                         <th className="py-3 px-4 font-semibold">邀请码</th>
                         <th className="py-3 px-4 font-semibold">来源类型</th>
                         <th className="py-3 px-4 font-semibold">状态</th>
-                        <th className="py-3 px-4 font-semibold">使用学员邮箱</th>
+                        <th className="py-3 px-4 font-semibold">使用学员（姓名 / 邮箱）</th>
                         <th className="py-3 px-4 font-semibold">备注说明</th>
                         <th className="py-3 px-4 font-semibold">创建时间</th>
                         <th className="py-3 px-4 font-semibold text-right">操作</th>
@@ -815,6 +814,12 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                       ) : (
                         filteredCodes.map((item) => {
                           const isSelected = selectedCodes.includes(item.code);
+                          const matchedUser = users.find(u => 
+                            (item.usedBy && u.email?.toLowerCase() === item.usedBy.toLowerCase()) ||
+                            (u.inviteCodeUsed && u.inviteCodeUsed.toUpperCase() === item.code.toUpperCase())
+                          );
+                          const studentName = item.usedByName || matchedUser?.name;
+
                           return (
                             <tr 
                               key={item.id || item.code} 
@@ -864,14 +869,21 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                                     有效 · 未使用
                                   </span>
                                 ) : (
-                                  <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px]">
-                                    已使用 · 已失效
+                                  <span className="px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-500 text-[10px] font-medium">
+                                    失效.已使用
                                   </span>
                                 )}
                               </td>
-                              <td className="py-3 px-4 text-slate-700 font-mono">
+                              <td className="py-3 px-4 text-slate-700">
                                 {item.usedBy ? (
-                                  <span className="text-slate-900 font-medium">{item.usedBy}</span>
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="text-xs font-semibold text-slate-900">
+                                      {studentName || '未填姓名'}
+                                    </span>
+                                    <span className="text-[11px] text-slate-500 font-mono">
+                                      {item.usedBy}
+                                    </span>
+                                  </div>
                                 ) : (
                                   <span className="text-slate-400">—</span>
                                 )}
@@ -1416,9 +1428,20 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                               </td>
                               <td className="py-3 px-4">
                                 {isCodeUsed ? (
-                                  <span className="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-medium">
-                                    已使用 ({linkedCode?.usedBy || '学员'})
-                                  </span>
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-medium w-fit">
+                                      失效.已使用
+                                    </span>
+                                    {linkedCode?.usedBy && (
+                                      <span className="text-[10px] text-slate-600 flex items-center gap-1 font-mono">
+                                        <span>
+                                          {linkedCode.usedByName || users.find(u => u.email?.toLowerCase() === linkedCode.usedBy?.toLowerCase())?.name 
+                                            ? `${linkedCode.usedByName || users.find(u => u.email?.toLowerCase() === linkedCode.usedBy?.toLowerCase())?.name} (${linkedCode.usedBy})` 
+                                            : linkedCode.usedBy}
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
                                 ) : isCodeDeleted ? (
                                   <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px]">
                                     已作废/已删除
@@ -1468,8 +1491,6 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
           )}
 
         </div>
-
-      </div>
 
       {/* In-app Confirmation Dialog - Light theme */}
       {confirmModal && (

@@ -122,7 +122,10 @@ export default function App() {
 
           {isAdmin && (
             <button
-              onClick={() => setShowAdminDashboard(true)}
+              onClick={() => {
+                setShowAdminDashboard(true);
+                setHasStarted(true);
+              }}
               className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-full text-xs font-semibold shadow-sm transition-all cursor-pointer ml-1"
             >
               <ShieldCheck size={14} />
@@ -196,7 +199,10 @@ export default function App() {
       >
         <div className="flex flex-col items-center gap-3">
           <button
-            onClick={() => setHasStarted(false)}
+            onClick={() => {
+              setHasStarted(false);
+              setShowAdminDashboard(false);
+            }}
             className="p-3 rounded-xl shadow-sm transition-all flex items-center justify-center bg-blue-500 text-white hover:bg-blue-600"
             title="回主页"
           >
@@ -216,9 +222,14 @@ export default function App() {
 
           {isAdmin && (
             <button
-              onClick={() => setShowAdminDashboard(true)}
-              className="p-3 rounded-xl shadow-sm transition-all flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
-              title="管理员后台"
+              onClick={() => setShowAdminDashboard(!showAdminDashboard)}
+              className={cn(
+                "p-3 rounded-xl shadow-sm transition-all flex items-center justify-center cursor-pointer",
+                showAdminDashboard
+                  ? "bg-indigo-600 text-white ring-2 ring-indigo-400 ring-offset-2 ring-offset-white"
+                  : "bg-indigo-600/90 hover:bg-indigo-600 text-white"
+              )}
+              title={showAdminDashboard ? "返回仿真演示" : "管理员后台"}
             >
               <ShieldCheck size={24} />
             </button>
@@ -257,52 +268,75 @@ export default function App() {
                     key={mod.id}
                     onClick={() => {
                       setActiveModule(mod.id);
+                      setShowAdminDashboard(false);
                       setIsMenuOpen(false);
                     }}
                     className={cn(
                       "flex items-center gap-3 px-4 py-3 rounded-xl transition-colors text-left",
-                      activeModule === mod.id 
+                      !showAdminDashboard && activeModule === mod.id 
                         ? "bg-blue-50 text-blue-700 font-medium" 
                         : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                     )}
                   >
-                    <mod.icon size={18} className={cn(activeModule === mod.id ? "text-blue-600" : "text-slate-400")} />
+                    <mod.icon size={18} className={cn(!showAdminDashboard && activeModule === mod.id ? "text-blue-600" : "text-slate-400")} />
                     <span className="text-sm">{mod.name}</span>
                   </button>
                 ))}
+
+                {isAdmin && (
+                  <div className="pt-2 mt-1 border-t border-slate-100">
+                    <button
+                      onClick={() => {
+                        setShowAdminDashboard(true);
+                        setIsMenuOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-left font-medium cursor-pointer",
+                        showAdminDashboard 
+                          ? "bg-indigo-50 text-indigo-700 font-semibold" 
+                          : "text-indigo-600 hover:bg-indigo-50/60"
+                      )}
+                    >
+                      <ShieldCheck size={18} className="text-indigo-600" />
+                      <span className="text-sm">系统管理后台</span>
+                    </button>
+                  </div>
+                )}
               </nav>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      {/* Main Full-Screen Frame */}
-      <div className="flex-1 h-full relative z-0" style={{ backgroundColor: iframeBgColor === 'transparent' ? '#000' : iframeBgColor }}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeModule}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="w-full h-full"
-          >
-            <IframeSandbox 
-              htmlContent={MODULES.find(m => m.id === activeModule)?.htmlContent || ''} 
-              title={MODULES.find(m => m.id === activeModule)?.name} 
-              onBgColorChange={(color) => setIframeBgColor(color)}
-            />
-          </motion.div>
-        </AnimatePresence>
+      {/* Main Right Content Frame: Simulation Modules or Admin Dashboard */}
+      <div 
+        className="flex-1 h-full relative z-0 overflow-hidden" 
+        style={{ backgroundColor: showAdminDashboard ? '#f8fafc' : (iframeBgColor === 'transparent' ? '#000' : iframeBgColor) }}
+      >
+        {showAdminDashboard ? (
+          <AdminDashboard
+            currentEmail={currentUser.email}
+            onClose={() => setShowAdminDashboard(false)}
+          />
+        ) : (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeModule}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="w-full h-full"
+            >
+              <IframeSandbox 
+                htmlContent={MODULES.find(m => m.id === activeModule)?.htmlContent || ''} 
+                title={MODULES.find(m => m.id === activeModule)?.name} 
+                onBgColorChange={(color) => setIframeBgColor(color)}
+              />
+            </motion.div>
+          </AnimatePresence>
+        )}
       </div>
-
-      {/* Admin Dashboard Overlay Modal */}
-      {showAdminDashboard && (
-        <AdminDashboard
-          currentEmail={currentUser.email}
-          onClose={() => setShowAdminDashboard(false)}
-        />
-      )}
 
     </div>
   );

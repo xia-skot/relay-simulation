@@ -19,6 +19,7 @@ export interface InviteCode {
   createdBy?: string;
   createdAt: string;
   usedBy?: string;
+  usedByName?: string;
   usedAt?: string;
   orderId?: string;
 }

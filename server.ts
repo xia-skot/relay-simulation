@@ -82,6 +82,7 @@ interface ServerInviteCode {
   createdBy?: string;
   createdAt: string;
   usedBy?: string;
+  usedByName?: string;
   usedAt?: string;
   orderId?: string;
 }
@@ -712,7 +713,7 @@ app.post('/api/auth/register', async (req, res) => {
             { code: { $regex: new RegExp(`^${escapedCode}$`, 'i') } }
           ]
         },
-        { $set: { status: 'used', usedBy: normalizedEmail, usedAt: new Date().toISOString() } }
+        { $set: { status: 'used', usedBy: normalizedEmail, usedByName: newUser.name, usedAt: new Date().toISOString() } }
       );
       // Clear verification code
       await db.collection('verification_codes').deleteOne({ email: normalizedEmail });
@@ -723,6 +724,7 @@ app.post('/api/auth/register', async (req, res) => {
         if (key.toUpperCase() === cleanInviteCode || val.code.toUpperCase() === cleanInviteCode) {
           val.status = 'used';
           val.usedBy = normalizedEmail;
+          val.usedByName = newUser.name;
           val.usedAt = new Date().toISOString();
         }
       }
@@ -1064,6 +1066,37 @@ app.get('/api/invite-codes', async (req, res) => {
     // Merge memory codes if DB had none
     if (list.length === 0) {
       list = Array.from(memoryInviteCodes.values());
+    }
+
+    // Enrich invite codes with user name if missing
+    try {
+      const db = await getDb();
+      const usersList = await db.collection('users').find({}, { projection: { email: 1, name: 1, inviteCodeUsed: 1 } }).toArray();
+      const emailToName = new Map<string, string>();
+      const codeToName = new Map<string, string>();
+      for (const u of usersList) {
+        if (u.email && u.name) emailToName.set(String(u.email).toLowerCase(), String(u.name));
+        if (u.inviteCodeUsed && u.name) codeToName.set(String(u.inviteCodeUsed).toUpperCase(), String(u.name));
+      }
+      for (const item of list) {
+        if (!item.usedByName) {
+          if (item.usedBy && emailToName.has(item.usedBy.toLowerCase())) {
+            item.usedByName = emailToName.get(item.usedBy.toLowerCase());
+          } else if (item.code && codeToName.has(item.code.toUpperCase())) {
+            item.usedByName = codeToName.get(item.code.toUpperCase());
+          }
+        }
+      }
+    } catch {
+      for (const item of list) {
+        if (!item.usedByName) {
+          const mu = memoryUsers.find(u =>
+            (item.usedBy && u.email?.toLowerCase() === item.usedBy.toLowerCase()) ||
+            (u.inviteCodeUsed && u.inviteCodeUsed.toUpperCase() === item.code.toUpperCase())
+          );
+          if (mu?.name) item.usedByName = mu.name;
+        }
+      }
     }
 
     res.json({ success: true, inviteCodes: list });
