@@ -4,7 +4,7 @@ import fs from 'fs';
 import { MongoClient, ObjectId } from 'mongodb';
 import nodemailer from 'nodemailer';
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -424,7 +424,17 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const isAdminUser = await checkIsAdmin(normalizedEmail);
-    const effectiveRole = (isAdminUser || foundUser.role === 'admin') ? 'admin' : 'user';
+    const effectiveRole = isAdminUser ? 'admin' : 'user';
+
+    // Auto-heal / sync role in database if it was inconsistent
+    if (foundUser.role !== effectiveRole) {
+      try {
+        const db = await getDb();
+        await db.collection('users').updateOne({ email: normalizedEmail }, { $set: { role: effectiveRole } });
+      } catch (syncErr) {
+        // ignore sync error
+      }
+    }
 
     res.json({
       success: true,
@@ -461,11 +471,10 @@ app.get('/api/admin/users', async (req, res) => {
       }));
     }
 
-    // Normalize roles
+    // Normalize roles strictly against admin collection
     for (const u of userList) {
-      if (u.email && await checkIsAdmin(u.email)) {
-        u.role = 'admin';
-      }
+      const isAdm = u.email ? await checkIsAdmin(u.email) : false;
+      u.role = isAdm ? 'admin' : 'user';
     }
 
     res.json({ success: true, users: userList });
