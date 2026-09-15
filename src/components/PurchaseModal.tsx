@@ -90,7 +90,7 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
       
       setTimeout(() => {
         setLoading(false);
-        setErrorMsg('请先完成扫码支付，5秒后可确认出码');
+        setErrorMsg('未检测到订单，请确认支付后重试');
         setHasAttemptedPayment(true);
         setCountdown(5);
       }, 1000);
