@@ -38,52 +38,31 @@ async function getDb() {
   return dbClient.db(DB_NAME);
 }
 
-// Mailer setup (163 mailbox)
-const SMTP_USER = (process.env.SMTP_USER || 'skot_catan@163.com').trim();
-// Note: 163 mailbox strictly requires client authorization password (16-char code from 163 settings), NOT web login password
-const SMTP_PASS = (process.env.SMTP_PASS || '').trim();
+// Mailer setup (flexible support for Brevo API, 163 SMTP, Resend, etc.)
+const SMTP_USER = (process.env.SMTP_USER || process.env.EMAIL_USER || process.env.MAIL_USER || 'skot_catan@163.com').trim();
+const SMTP_PASS = (process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.MAIL_PASS || 'ADkfs5ZgV9wtgiSY').trim();
+const SMTP_FROM = (process.env.SMTP_FROM || process.env.SMTP_USER || 'skot_catan@163.com').trim();
+const BREVO_API_KEY = (process.env.BREVO_API_KEY || '').trim();
+const RESEND_API_KEY = (process.env.RESEND_API_KEY || '').trim();
 
-// Custom IPv4 lookup function that strictly resolves IPv4 only (prevents ENETUNREACH with IPv6 in cloud/Render environments)
-function ipv4Lookup(hostname: string, options: any, callback: any) {
-  const cb = typeof options === 'function' ? options : callback;
-  dns.lookup(hostname, { family: 4 }, (err, address) => {
-    if (err) return cb(err);
-    cb(null, address, 4);
-  });
-}
-
-async function createTransporter() {
+// 1. Standard nodemailer 'service: 163' (identical to standard Node.js mailer setups like Catan)
+function createStandardTransporter() {
   const pass = SMTP_PASS || 'ADkfs5ZgV9wtgiSY';
-  if (!pass) {
-    return null;
-  }
-  let ipv4 = '103.129.252.45';
-  try {
-    const addresses = await dns.promises.resolve4('smtp.163.com');
-    if (addresses && addresses.length > 0) {
-      ipv4 = addresses[0];
-    }
-  } catch (err) {
-    console.warn('dns.promises.resolve4 fallback to default IPv4:', err);
-    ipv4 = '103.129.252.45';
-  }
-
+  if (!pass) return null;
   return nodemailer.createTransport({
-    host: ipv4, // Strictly bind to IPv4 address, NEVER use IPv6 on Render
-    port: 465,
-    secure: true, // true for 465 SSL
+    service: '163',
     auth: {
       user: SMTP_USER,
       pass: pass,
     },
-    tls: {
-      servername: 'smtp.163.com',
-      rejectUnauthorized: false
-    },
-    connectionTimeout: 8000,
-    greetingTimeout: 8000,
-    socketTimeout: 10000,
-  } as any);
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+  });
+}
+
+// 2. Custom IPv4 direct transporter fallback
+async function createTransporter() {
+  return createStandardTransporter();
 }
 
 // Memory fallback store for codes and users if Mongo is connecting or in demo mode
@@ -229,39 +208,109 @@ app.post('/api/auth/send-code', async (req, res) => {
       memoryCodes.set(normalizedEmail, { code, expiresAt });
     }
 
-    // Try sending email via 163 SMTP
-    const transporter = await createTransporter();
+    // Email body template
+    const emailHtml = `
+      <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #1e3a8a; margin-top: 0;">继电保护可视化教学平台</h2>
+        <p style="color: #475569; font-size: 15px;">您好！您正在进行账号邮箱验证，您的验证码为：</p>
+        <div style="text-align: center; margin: 24px 0;">
+          <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #2563eb; background: #eff6ff; padding: 10px 24px; border-radius: 8px; border: 1px dashed #93c5fd;">
+            ${code}
+          </span>
+        </div>
+        <p style="color: #64748b; font-size: 13px;">验证码有效期为 10 分钟。若非您本人操作，请忽略此邮件。</p>
+        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+        <p style="color: #94a3b8; font-size: 11px;">此为系统自动邮件，请勿直接回复。</p>
+      </div>
+    `;
+
     let emailSent = false;
     let mailErrorMessage = '';
 
-    if (transporter) {
+    // Strategy 1: Brevo (Sendinblue) HTTPS API (Exact match with Skot-catan-game on Render)
+    if (BREVO_API_KEY) {
       try {
-        await transporter.sendMail({
-          from: `"继电保护仿真平台" <${SMTP_USER}>`,
-          to: normalizedEmail,
-          subject: `【继电保护平台】注册验证码：${code}`,
-          html: `
-            <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-              <h2 style="color: #1e3a8a; margin-top: 0;">继电保护可视化教学平台</h2>
-              <p style="color: #475569; font-size: 15px;">您好！您正在进行账号邮箱验证，您的验证码为：</p>
-              <div style="text-align: center; margin: 24px 0;">
-                <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #2563eb; background: #eff6ff; padding: 10px 24px; border-radius: 8px; border: 1px dashed #93c5fd;">
-                  ${code}
-                </span>
-              </div>
-              <p style="color: #64748b; font-size: 13px;">验证码有效期为 10 分钟。若非您本人操作，请忽略此邮件。</p>
-              <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
-              <p style="color: #94a3b8; font-size: 11px;">此为系统自动邮件，请勿直接回复。</p>
-            </div>
-          `
+        const brevoResp = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'api-key': BREVO_API_KEY,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            sender: {
+              name: '继电保护仿真平台',
+              email: SMTP_FROM || SMTP_USER || 'skot_catan@163.com'
+            },
+            to: [{ email: normalizedEmail }],
+            subject: `【继电保护平台】注册验证码：${code}`,
+            htmlContent: emailHtml
+          })
         });
-        emailSent = true;
-      } catch (mailErr: any) {
-        mailErrorMessage = mailErr?.message || String(mailErr);
-        console.error('163 SMTP 发信失败:', mailErrorMessage);
+        const bData: any = await brevoResp.json();
+        if (brevoResp.ok && (bData.messageId || bData.messageIds)) {
+          emailSent = true;
+          console.log('Brevo HTTPS 发信成功, MessageId:', bData.messageId || bData.messageIds);
+        } else {
+          mailErrorMessage = bData?.message || JSON.stringify(bData);
+          console.warn('Brevo 发信返回:', bData);
+        }
+      } catch (bErr: any) {
+        mailErrorMessage = bErr.message || String(bErr);
+        console.warn('Brevo HTTPS 发信异常:', bErr);
       }
-    } else {
-      mailErrorMessage = '服务器未配置 SMTP_PASS 发信授权码';
+    }
+
+    // Strategy 2: If RESEND_API_KEY is configured, use Resend HTTPS (Port 443 - zero block risk)
+    if (!emailSent && RESEND_API_KEY) {
+      try {
+        const resendResp = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${RESEND_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: '继电保护平台 <onboarding@resend.dev>',
+            to: [normalizedEmail],
+            subject: `【继电保护平台】注册验证码：${code}`,
+            html: emailHtml
+          })
+        });
+        const resData: any = await resendResp.json();
+        if (resendResp.ok && resData.id) {
+          emailSent = true;
+          console.log('Resend HTTPS 发信成功, ID:', resData.id);
+        } else {
+          mailErrorMessage = resData?.message || JSON.stringify(resData);
+          console.warn('Resend 发信返回:', resData);
+        }
+      } catch (rErr: any) {
+        mailErrorMessage = rErr.message || String(rErr);
+        console.warn('Resend HTTPS 发信异常:', rErr);
+      }
+    }
+
+    // Strategy 2: Standard 163 Mail Service (same configuration as Catan project)
+    if (!emailSent) {
+      const transporter = createStandardTransporter();
+      if (transporter) {
+        try {
+          await transporter.sendMail({
+            from: `"继电保护仿真平台" <${SMTP_USER}>`,
+            to: normalizedEmail,
+            subject: `【继电保护平台】注册验证码：${code}`,
+            html: emailHtml
+          });
+          emailSent = true;
+          console.log('163 标准服务发信成功');
+        } catch (mailErr: any) {
+          mailErrorMessage = mailErr?.message || String(mailErr);
+          console.error('163 SMTP 发信失败:', mailErrorMessage);
+        }
+      } else {
+        mailErrorMessage = '服务器未配置发信授权码';
+      }
     }
 
     if (emailSent) {
