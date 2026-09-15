@@ -21,7 +21,11 @@ import {
   Calendar,
   Clock,
   ArrowRight,
-  AlertTriangle
+  AlertTriangle,
+  Database,
+  Activity,
+  Server,
+  Info
 } from 'lucide-react';
 import {
   apiGetAdminUsers,
@@ -60,6 +64,9 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState | null>(null);
   const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+  const [dbDiagnostics, setDbDiagnostics] = useState<any>(null);
+  const [showDbModal, setShowDbModal] = useState(false);
+  const [dbChecking, setDbChecking] = useState(false);
 
   // 1. Invite Codes State
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
@@ -91,16 +98,35 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
     setTimeout(() => setFeedback(null), 3500);
   };
 
+  // Check database health and load diagnostics
+  const checkDbHealth = async () => {
+    setDbChecking(true);
+    try {
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      setDbDiagnostics(data);
+      if (data.mongo === 'connected') {
+        setDbStatus('connected');
+      } else {
+        setDbStatus('disconnected');
+      }
+      return data;
+    } catch (e: any) {
+      setDbStatus('disconnected');
+      setDbDiagnostics({ mongo: 'error', error: e.message });
+      return null;
+    } finally {
+      setDbChecking(false);
+    }
+  };
+
   // Load data on mount or tab change
   const loadAllData = async () => {
     setLoading(true);
     setDbStatus('checking');
     try {
       // Check database connection health
-      fetch('/api/health')
-        .then(res => res.json())
-        .then(data => setDbStatus(data.mongo === 'connected' ? 'connected' : 'disconnected'))
-        .catch(() => setDbStatus('disconnected'));
+      checkDbHealth();
 
       const [uRes, aRes, iRes, pRes, oRes] = await Promise.all([
         apiGetAdminUsers(),
@@ -340,16 +366,33 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                   管理员专属
                 </span>
                 {dbStatus === 'connected' ? (
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold flex items-center gap-1 border border-emerald-500/30 ml-2">
-                    <CheckCircle2 size={10} /> 数据库已连接
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { checkDbHealth(); setShowDbModal(true); }}
+                    className="px-2.5 py-1 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5 border border-emerald-500/30 transition-all cursor-pointer group"
+                    title="点击查看数据库连接自检详情"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>数据库已连接</span>
+                    {dbDiagnostics?.latencyMs !== undefined && (
+                      <span className="text-[10px] text-emerald-400/80 font-mono">({dbDiagnostics.latencyMs}ms)</span>
+                    )}
+                    <Info size={11} className="text-emerald-400/70 group-hover:text-emerald-300" />
+                  </button>
                 ) : dbStatus === 'disconnected' ? (
-                  <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 text-[11px] font-semibold flex items-center gap-1 border border-red-500/30 ml-2">
-                    <AlertTriangle size={10} /> 数据库未连接
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { checkDbHealth(); setShowDbModal(true); }}
+                    className="px-2.5 py-1 rounded-full bg-red-500/15 hover:bg-red-500/25 text-red-300 text-[11px] font-semibold flex items-center gap-1.5 border border-red-500/30 transition-all cursor-pointer group"
+                    title="点击查看异常自检详情"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                    <span>数据库未连接</span>
+                    <Info size={11} className="text-red-400/70 group-hover:text-red-300" />
+                  </button>
                 ) : (
-                  <span className="px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-300 text-[11px] font-semibold flex items-center gap-1 border border-slate-500/30 ml-2 animate-pulse">
-                    <RefreshCw size={10} className="animate-spin" /> 检测中
+                  <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 text-[11px] font-semibold flex items-center gap-1.5 border border-slate-700 animate-pulse">
+                    <RefreshCw size={10} className="animate-spin text-blue-400" /> 数据库自检中
                   </span>
                 )}
               </div>
@@ -1180,6 +1223,142 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                 }`}
               >
                 {confirmModal.confirmText || '确定'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Database Diagnostics & Health Modal */}
+      {showDbModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                  <Database size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    数据库与服务健康自检报告
+                  </h3>
+                  <p className="text-xs text-slate-400">实时检测云端持久化存储连接状态</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDbModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Status Item: MongoDB Cluster */}
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Server size={18} className="text-blue-400" />
+                  <div>
+                    <div className="text-xs font-semibold text-white">MongoDB 云数据库集群</div>
+                    <div className="text-[11px] text-slate-400">Cluster0 (Atlas 分布式高可用)</div>
+                  </div>
+                </div>
+                <div>
+                  {dbStatus === 'connected' ? (
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold flex items-center gap-1 border border-emerald-500/30">
+                      <CheckCircle2 size={12} /> 连接畅通
+                    </span>
+                  ) : dbStatus === 'disconnected' ? (
+                    <span className="px-2.5 py-1 rounded-full bg-red-500/20 text-red-300 text-xs font-bold flex items-center gap-1 border border-red-500/30">
+                      <AlertTriangle size={12} /> 未连接 / 离线
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 text-xs flex items-center gap-1">
+                      <RefreshCw size={12} className="animate-spin" /> 检测中
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Status Item: Latency & Target Database */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <Activity size={12} className="text-amber-400" /> 自检响应延迟
+                  </div>
+                  <div className="text-sm font-bold font-mono text-emerald-400">
+                    {dbDiagnostics?.latencyMs !== undefined ? `${dbDiagnostics.latencyMs} ms` : '计算中...'}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <Database size={12} className="text-blue-400" /> 当前数据库
+                  </div>
+                  <div className="text-sm font-bold font-mono text-slate-200 truncate">
+                    {dbDiagnostics?.stats?.dbName || 'relay_platform'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Collections Stat Cards */}
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span>云数据库集合 (Collections) 数据统计</span>
+                  <span className="text-[10px] text-slate-500 font-normal">多端实时同步</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                  <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+                    <div className="text-base font-bold font-mono text-blue-400">
+                      {dbDiagnostics?.stats?.userCount ?? users.length}
+                    </div>
+                    <div className="text-[10px] text-slate-400">注册用户数</div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+                    <div className="text-base font-bold font-mono text-purple-400">
+                      {dbDiagnostics?.stats?.codeCount ?? inviteCodes.length}
+                    </div>
+                    <div className="text-[10px] text-slate-400">有效邀请码</div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+                    <div className="text-base font-bold font-mono text-emerald-400">
+                      {dbDiagnostics?.stats?.orderCount ?? orders.length}
+                    </div>
+                    <div className="text-[10px] text-slate-400">购买订单记录</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SMTP Mailer Status */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+                <div className="text-xs">
+                  <span className="text-slate-400">验证码邮件服务 (SMTP 163): </span>
+                  <span className="text-slate-200 font-mono font-medium">
+                    {dbDiagnostics?.smtpUser || 'skot_catan@163.com'}
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  {dbDiagnostics?.smtpConfigured ? '授权码已配置' : '默认配置'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <button
+                type="button"
+                onClick={checkDbHealth}
+                disabled={dbChecking}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-blue-300 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={dbChecking ? 'animate-spin' : ''} />
+                {dbChecking ? '正在自检...' : '立即重新自检'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowDbModal(false)}
+                className="px-5 py-2 rounded-xl text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+              >
+                关闭
               </button>
             </div>
           </div>

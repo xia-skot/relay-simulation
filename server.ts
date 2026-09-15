@@ -140,10 +140,22 @@ async function checkIsAdmin(email: string): Promise<boolean> {
 // 1. Health check & status
 app.get('/api/health', async (req, res) => {
   let mongoStatus = 'unknown';
+  let latencyMs = 0;
+  let stats: any = {};
   try {
+    const startTime = Date.now();
     const db = await getDb();
     await db.command({ ping: 1 });
+    latencyMs = Date.now() - startTime;
     mongoStatus = 'connected';
+
+    // Optional quick counts for diagnostics
+    const [userCount, codeCount, orderCount] = await Promise.all([
+      db.collection('users').countDocuments().catch(() => 0),
+      db.collection('invite_codes').countDocuments().catch(() => 0),
+      db.collection('purchase_orders').countDocuments().catch(() => 0),
+    ]);
+    stats = { userCount, codeCount, orderCount, dbName: DB_NAME };
   } catch (err: any) {
     mongoStatus = `error: ${err.message}`;
   }
@@ -151,8 +163,11 @@ app.get('/api/health', async (req, res) => {
   res.json({
     status: 'ok',
     mongo: mongoStatus,
+    latencyMs,
+    stats,
     smtpConfigured: Boolean(SMTP_PASS),
-    smtpUser: SMTP_USER
+    smtpUser: SMTP_USER,
+    serverTime: new Date().toISOString()
   });
 });
 
