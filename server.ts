@@ -1,8 +1,14 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import dns from 'dns';
 import { MongoClient, ObjectId } from 'mongodb';
 import nodemailer from 'nodemailer';
+
+// Force Node.js DNS resolution to prioritize IPv4 (avoids ENETUNREACH with 163 mailbox IPv6 on cloud hosts like Render)
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const app = express();
