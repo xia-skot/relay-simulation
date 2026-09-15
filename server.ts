@@ -42,6 +42,15 @@ const SMTP_USER = (process.env.SMTP_USER || 'skot_catan@163.com').trim();
 // Note: 163 mailbox strictly requires client authorization password (16-char code from 163 settings), NOT web login password
 const SMTP_PASS = (process.env.SMTP_PASS || '').trim();
 
+// Custom IPv4 lookup function that strictly resolves IPv4 only (prevents ENETUNREACH with IPv6 in cloud/Render environments)
+function ipv4Lookup(hostname: string, options: any, callback: any) {
+  const cb = typeof options === 'function' ? options : callback;
+  dns.lookup(hostname, { family: 4 }, (err, address) => {
+    if (err) return cb(err);
+    cb(null, address, 4);
+  });
+}
+
 function createTransporter() {
   if (!SMTP_PASS) {
     return null;
@@ -49,18 +58,20 @@ function createTransporter() {
   return nodemailer.createTransport({
     host: 'smtp.163.com',
     port: 465,
-    secure: true, // true for 465
-    family: 4, // Force IPv4 to prevent ENETUNREACH on cloud containers
+    secure: true, // true for 465 SSL
+    lookup: ipv4Lookup,
+    family: 4, // Force IPv4
     auth: {
       user: SMTP_USER,
       pass: SMTP_PASS,
     },
     tls: {
+      servername: 'smtp.163.com',
       rejectUnauthorized: false
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
   } as any);
 }
 
