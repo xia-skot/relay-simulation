@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import dns from 'dns';
+import net from 'net';
 import { MongoClient, ObjectId } from 'mongodb';
 import nodemailer from 'nodemailer';
 
@@ -51,17 +52,26 @@ function ipv4Lookup(hostname: string, options: any, callback: any) {
   });
 }
 
-function createTransporter() {
+async function createTransporter() {
   const pass = SMTP_PASS || 'ADkfs5ZgV9wtgiSY';
   if (!pass) {
     return null;
   }
+  let ipv4 = '103.129.252.45';
+  try {
+    const addresses = await dns.promises.resolve4('smtp.163.com');
+    if (addresses && addresses.length > 0) {
+      ipv4 = addresses[0];
+    }
+  } catch (err) {
+    console.warn('dns.promises.resolve4 fallback to default IPv4:', err);
+    ipv4 = '103.129.252.45';
+  }
+
   return nodemailer.createTransport({
-    host: 'smtp.163.com',
+    host: ipv4, // Strictly bind to IPv4 address, NEVER use IPv6 on Render
     port: 465,
     secure: true, // true for 465 SSL
-    lookup: ipv4Lookup,
-    family: 4, // Force IPv4
     auth: {
       user: SMTP_USER,
       pass: pass,
@@ -70,9 +80,9 @@ function createTransporter() {
       servername: 'smtp.163.com',
       rejectUnauthorized: false
     },
-    connectionTimeout: 6000,
-    greetingTimeout: 6000,
-    socketTimeout: 8000,
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 10000,
   } as any);
 }
 
@@ -220,7 +230,7 @@ app.post('/api/auth/send-code', async (req, res) => {
     }
 
     // Try sending email via 163 SMTP
-    const transporter = createTransporter();
+    const transporter = await createTransporter();
     let emailSent = false;
     let mailErrorMessage = '';
 
@@ -285,6 +295,268 @@ app.post('/api/auth/send-code', async (req, res) => {
   } catch (err: any) {
     console.warn('Send code exception:', err);
     res.status(500).json({ success: false, message: '发送验证码服务异常，请重试' });
+  }
+});
+
+// Diagnostic helper: Raw TCP connection probe
+function probeTcp(host: string, port: number, timeoutMs = 4000): Promise<{ host: string; port: number; reachable: boolean; latencyMs: number; error?: string; code?: string }> {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const socket = new net.Socket();
+    let isSettled = false;
+
+    socket.setTimeout(timeoutMs);
+
+    socket.on('connect', () => {
+      if (isSettled) return;
+      isSettled = true;
+      const latencyMs = Date.now() - startTime;
+      socket.destroy();
+      resolve({ host, port, reachable: true, latencyMs });
+    });
+
+    socket.on('timeout', () => {
+      if (isSettled) return;
+      isSettled = true;
+      socket.destroy();
+      resolve({ host, port, reachable: false, latencyMs: Date.now() - startTime, error: 'Connection timed out', code: 'ETIMEDOUT' });
+    });
+
+    socket.on('error', (err: any) => {
+      if (isSettled) return;
+      isSettled = true;
+      socket.destroy();
+      resolve({ host, port, reachable: false, latencyMs: Date.now() - startTime, error: err.message, code: err.code });
+    });
+
+    try {
+      socket.connect(port, host);
+    } catch (err: any) {
+      if (isSettled) return;
+      isSettled = true;
+      resolve({ host, port, reachable: false, latencyMs: Date.now() - startTime, error: err.message, code: err.code });
+    }
+  });
+}
+
+// 2.5 Real-time SMTP Diagnostic Endpoint
+app.get('/api/debug/smtp-diagnostic', async (req, res) => {
+  try {
+    const report: any = {
+      timestamp: new Date().toISOString(),
+      environment: {
+        smtpUser: SMTP_USER,
+        smtpPassConfigured: !!(process.env.SMTP_PASS || SMTP_PASS),
+        smtpPassLength: (process.env.SMTP_PASS || SMTP_PASS || '').length,
+        nodeEnv: process.env.NODE_ENV || 'development',
+      },
+      dns: {},
+      tcpProbes: [],
+      smtpAuth: {},
+    };
+
+    // Step 1: DNS Resolution Probes
+    try {
+      const startDns = Date.now();
+      const defaultLookup: any = await new Promise((resolve, reject) => {
+        dns.lookup('smtp.163.com', { all: true }, (err, addresses) => {
+          if (err) reject(err);
+          else resolve(addresses);
+        });
+      });
+      report.dns.defaultLookup = defaultLookup;
+      report.dns.defaultLatencyMs = Date.now() - startDns;
+    } catch (err: any) {
+      report.dns.defaultError = err.message;
+    }
+
+    try {
+      const startIpv4 = Date.now();
+      const ipv4Address: any = await new Promise((resolve, reject) => {
+        dns.lookup('smtp.163.com', { family: 4 }, (err, address) => {
+          if (err) reject(err);
+          else resolve(address);
+        });
+      });
+      report.dns.ipv4Address = ipv4Address;
+      report.dns.ipv4LatencyMs = Date.now() - startIpv4;
+    } catch (err: any) {
+      report.dns.ipv4Error = err.message;
+    }
+
+    // Step 2: TCP Socket Port Probes
+    const tcpTargets = [
+      { host: '103.129.252.45', port: 465, label: '163官方IPv4直连 (465 SSL)' },
+      { host: 'smtp.163.com', port: 465, label: 'smtp.163.com 域名 (465 SSL)' },
+      { host: 'smtp.163.com', port: 587, label: 'smtp.163.com 域名 (587 STARTTLS)' },
+      { host: 'smtp.163.com', port: 994, label: 'smtp.163.com 域名 (994 备用SSL)' },
+      { host: 'smtp.163.com', port: 25, label: 'smtp.163.com 域名 (25 标准端口)' },
+    ];
+
+    for (const target of tcpTargets) {
+      const probeResult = await probeTcp(target.host, target.port, 4000);
+      report.tcpProbes.push({
+        ...target,
+        ...probeResult,
+      });
+    }
+
+    // Step 3: SMTP Handshake & Auth Verification
+    const transporter = await createTransporter();
+    if (!transporter) {
+      report.smtpAuth.status = 'SKIPPED';
+      report.smtpAuth.message = '未配置 SMTP_PASS 授权码';
+    } else {
+      try {
+        const verifyResult = await new Promise((resolve, reject) => {
+          transporter.verify((err, success) => {
+            if (err) reject(err);
+            else resolve(success);
+          });
+        });
+        report.smtpAuth.status = 'SUCCESS';
+        report.smtpAuth.message = 'SMTP 握手与客户端授权码验证成功！服务器连接正常';
+        report.smtpAuth.result = verifyResult;
+      } catch (authErr: any) {
+        report.smtpAuth.status = 'FAILED';
+        report.smtpAuth.message = authErr.message;
+        report.smtpAuth.code = authErr.code;
+        report.smtpAuth.command = authErr.command;
+        report.smtpAuth.response = authErr.response;
+        report.smtpAuth.stack = authErr.stack;
+      }
+    }
+
+    // Step 4: Optional live test mail sending
+    const targetRecipient = req.query.to ? String(req.query.to).trim() : (req.query.send ? SMTP_USER : null);
+    if (targetRecipient && transporter) {
+      try {
+        const mailInfo = await transporter.sendMail({
+          from: `"系统诊断测试" <${SMTP_USER}>`,
+          to: targetRecipient,
+          subject: '【继电保护平台】实时网络诊断测试邮件',
+          text: `这是一封从当前服务器环境发出的实时连通性测试邮件。\n诊断时间：${new Date().toLocaleString()}\n接收邮箱：${targetRecipient}`,
+        });
+        report.liveSend = {
+          recipient: targetRecipient,
+          status: 'SUCCESS',
+          response: mailInfo.response,
+          messageId: mailInfo.messageId,
+        };
+      } catch (sendErr: any) {
+        report.liveSend = {
+          recipient: targetRecipient,
+          status: 'FAILED',
+          error: sendErr.message,
+          code: sendErr.code,
+        };
+      }
+    }
+
+    // Format output: JSON if requested, otherwise human-friendly HTML page
+    if (req.query.format === 'json' || req.headers.accept?.includes('application/json')) {
+      return res.json({ success: true, report });
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="zh-CN">
+      <head>
+        <meta charset="utf-8" />
+        <title>继电保护平台 - SMTP 邮件网络诊断报告</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 24px; line-height: 1.6; }
+          .container { max-width: 900px; margin: 0 auto; background: #1e293b; border-radius: 12px; padding: 28px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }
+          h1 { color: #38bdf8; margin-top: 0; font-size: 22px; border-bottom: 1px solid #334155; padding-bottom: 12px; }
+          .card { background: #0f172a; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid #334155; }
+          .tag { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 13px; }
+          .tag-green { background: #065f46; color: #34d399; }
+          .tag-red { background: #7f1d1d; color: #f87171; }
+          .tag-yellow { background: #78350f; color: #fbbf24; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          th, td { text-align: left; padding: 10px; border-bottom: 1px solid #334155; font-size: 13px; }
+          th { color: #94a3b8; font-weight: 600; }
+          pre { background: #020617; padding: 12px; border-radius: 6px; overflow-x: auto; color: #cbd5e1; font-size: 12px; }
+          .action-btn { background: #2563eb; color: #fff; padding: 8px 16px; border-radius: 6px; text-decoration: none; display: inline-block; font-size: 13px; margin-top: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🔬 继电保护平台 · 邮件网络链路全步骤诊断报告</h1>
+          <p style="color: #94a3b8; font-size: 13px;">诊断发起时间：${report.timestamp} · 运行环境：${report.environment.nodeEnv}</p>
+
+          <div class="card">
+            <h3 style="color: #60a5fa; margin-top: 0;">第 1 步：环境变量凭据检测</h3>
+            <p>发信账号 (SMTP_USER)：<code>${report.environment.smtpUser}</code></p>
+            <p>授权密码 (SMTP_PASS)：
+              ${report.environment.smtpPassConfigured ? `<span class="tag tag-green">已配置 (长度: ${report.environment.smtpPassLength} 字符)</span>` : '<span class="tag tag-red">未配置</span>'}
+            </p>
+          </div>
+
+          <div class="card">
+            <h3 style="color: #60a5fa; margin-top: 0;">第 2 步：DNS 域名解析检测 (smtp.163.com)</h3>
+            <p>IPv4 解析结果：<code>${report.dns.ipv4Address || '解析失败: ' + report.dns.ipv4Error}</code> (耗时: ${report.dns.ipv4LatencyMs || '-'} ms)</p>
+            <p>系统多栈默认解析：<code>${JSON.stringify(report.dns.defaultLookup || report.dns.defaultError)}</code></p>
+          </div>
+
+          <div class="card">
+            <h3 style="color: #60a5fa; margin-top: 0;">第 3 步：TCP 端口连通性探测 (Raw Socket Probe)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>探测目标</th>
+                  <th>端口</th>
+                  <th>连通状态</th>
+                  <th>耗时 / 错误代码</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${report.tcpProbes.map((p: any) => `
+                  <tr>
+                    <td><strong>${p.label}</strong><br/><span style="color:#64748b; font-size:11px;">${p.host}</span></td>
+                    <td><code>${p.port}</code></td>
+                    <td>
+                      ${p.reachable ? '<span class="tag tag-green">🟢 畅通 (CONNECTED)</span>' : '<span class="tag tag-red">🔴 拦截 / 超时</span>'}
+                    </td>
+                    <td>
+                      ${p.reachable ? `${p.latencyMs} ms` : `<span style="color: #f87171;">${p.code || p.error} (${p.latencyMs} ms)</span>`}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <h3 style="color: #60a5fa; margin-top: 0;">第 4 步：SMTP 认证握手</h3>
+            <p>握手状态：
+              ${report.smtpAuth.status === 'SUCCESS' ? '<span class="tag tag-green">🟢 认证成功 (250 OK)</span>' : '<span class="tag tag-red">🔴 认证或握手失败</span>'}
+            </p>
+            <p>详细消息：<code>${report.smtpAuth.message}</code></p>
+            ${report.smtpAuth.code ? `<p>错误代码：<code>${report.smtpAuth.code}</code></p>` : ''}
+            ${report.smtpAuth.response ? `<p>邮件服务器原始回复：<code>${report.smtpAuth.response}</code></p>` : ''}
+          </div>
+
+          ${report.liveSend ? `
+            <div class="card">
+              <h3 style="color: #60a5fa; margin-top: 0;">第 5 步：真实发信测试结果</h3>
+              <p>收件人：<code>${report.liveSend.recipient}</code></p>
+              <p>结果：${report.liveSend.status === 'SUCCESS' ? '<span class="tag tag-green">🟢 发信成功</span>' : '<span class="tag tag-red">🔴 发信失败: ' + report.liveSend.error + '</span>'}</p>
+            </div>
+          ` : ''}
+
+          <div style="margin-top: 20px;">
+            <a class="action-btn" href="/api/debug/smtp-diagnostic?to=yxxia1224@163.com">向 yxxia1224@163.com 发起真实发信测验</a>
+            <a class="action-btn" style="background: #475569; margin-left: 10px;" href="/api/debug/smtp-diagnostic?format=json">查看原始 JSON 数据</a>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (fatalErr: any) {
+    res.status(500).json({ success: false, error: fatalErr.message, stack: fatalErr.stack });
   }
 });
 
