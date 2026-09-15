@@ -44,14 +44,18 @@ function createTransporter() {
     host: 'smtp.163.com',
     port: 465,
     secure: true, // true for 465
+    family: 4, // Force IPv4 to prevent ENETUNREACH on cloud containers
     auth: {
       user: SMTP_USER,
       pass: SMTP_PASS,
     },
-    connectionTimeout: 8000,
-    greetingTimeout: 8000,
-    socketTimeout: 10000,
-  });
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  } as any);
 }
 
 // Memory fallback store for codes and users if Mongo is connecting or in demo mode
@@ -200,14 +204,14 @@ app.post('/api/auth/send-code', async (req, res) => {
     // Try sending email via 163 SMTP
     const transporter = createTransporter();
     let emailSent = false;
-    let fallbackNotice = '';
+    let mailErrorMessage = '';
 
     if (transporter) {
       try {
         await transporter.sendMail({
           from: `"继电保护仿真平台" <${SMTP_USER}>`,
           to: normalizedEmail,
-          subject: `【继电保护平台】验证码：${code}`,
+          subject: `【继电保护平台】注册验证码：${code}`,
           html: `
             <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
               <h2 style="color: #1e3a8a; margin-top: 0;">继电保护可视化教学平台</h2>
@@ -225,32 +229,22 @@ app.post('/api/auth/send-code', async (req, res) => {
         });
         emailSent = true;
       } catch (mailErr: any) {
-        const errMessage = mailErr?.message || String(mailErr);
-        console.warn('163 SMTP 发信状态提示 (已启动自愈与自动填码):', errMessage);
-
-        if (errMessage.includes('535') || errMessage.includes('authentication failed')) {
-          fallbackNotice = '163 邮箱认证失败(535)：提示授权码不匹配。163 邮箱发信须在【网页版设置 -> POP3/SMTP/IMAP】中获取专属 16 位授权码（不能使用网页登录密码）。为方便当前测试，已为您自动填入验证码！';
-        } else if (errMessage.includes('ETIMEDOUT') || errMessage.includes('ECONNREFUSED')) {
-          fallbackNotice = '163 邮箱服务器连接超时。为方便当前测试，已为您自动填入验证码！';
-        } else {
-          fallbackNotice = `163 邮箱提示（${errMessage}）。为方便当前测试，已为您自动填入验证码！`;
-        }
+        mailErrorMessage = mailErr?.message || String(mailErr);
+        console.error('163 SMTP 发信失败:', mailErrorMessage);
       }
+    } else {
+      mailErrorMessage = '服务器未配置 SMTP_PASS 发信授权码';
     }
 
     if (emailSent) {
       return res.json({
         success: true,
-        message: '验证码已成功发送至您的邮箱，请注意查收'
+        message: '验证码已发送至您的邮箱，请注意查收（若未收到请检查垃圾箱）'
       });
     } else {
-      // Return success with devCode so user is never locked out of testing and can proceed immediately
-      const notice = fallbackNotice || `【演示测试模式】验证码为 ${code}（如需正式向邮箱发信，请在环境配置 163 邮箱专属授权码 SMTP_PASS）`;
-      return res.json({
-        success: true,
-        fallback: true,
-        message: notice,
-        devCode: code
+      return res.status(500).json({
+        success: false,
+        message: `验证码邮件发送失败：${mailErrorMessage || '请稍后重试'}`
       });
     }
   } catch (err: any) {
@@ -498,6 +492,110 @@ app.get('/api/admin/users', async (req, res) => {
   } catch (err: any) {
     console.error('Get users error:', err);
     res.status(500).json({ success: false, message: '获取用户列表失败' });
+  }
+});
+
+// 5b. Delete single user (Admin only)
+app.delete('/api/admin/users/:identifier', async (req, res) => {
+  try {
+    const rawParam = decodeURIComponent(req.params.identifier).trim();
+    if (!rawParam) {
+      return res.status(400).json({ success: false, message: '缺少用户标识' });
+    }
+
+    const normEmail = rawParam.toLowerCase();
+    if (normEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      return res.status(403).json({ success: false, message: '超级管理员账号不可删除' });
+    }
+
+    // 1. Delete from memory
+    const memIdx = memoryUsers.findIndex(u => u.email?.toLowerCase() === normEmail || (u as any).id === rawParam);
+    if (memIdx !== -1) {
+      memoryUsers.splice(memIdx, 1);
+    }
+    // Also remove from admin list if present (except super admin)
+    memoryAdmins.delete(normEmail);
+
+    // 2. Delete from MongoDB
+    try {
+      const db = await getDb();
+      const orConditions: any[] = [
+        { email: normEmail },
+        { email: { $regex: new RegExp(`^${normEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }
+      ];
+      if (ObjectId.isValid(rawParam)) {
+        orConditions.push({ _id: new ObjectId(rawParam) });
+      }
+      await db.collection('users').deleteMany({ $or: orConditions });
+      await db.collection('admins').deleteMany({ email: normEmail });
+    } catch (dbErr) {
+      console.error('Mongo delete user error:', dbErr);
+    }
+
+    res.json({ success: true, message: `用户【${rawParam}】已成功删除` });
+  } catch (err: any) {
+    console.error('Delete user error:', err);
+    res.status(500).json({ success: false, message: '删除用户失败' });
+  }
+});
+
+// 5c. Batch delete users (Admin only)
+app.post('/api/admin/users/batch-delete', async (req, res) => {
+  try {
+    const { emails } = req.body;
+    if (!Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({ success: false, message: '请选择要删除的用户' });
+    }
+
+    // Filter out super admin
+    const targetEmails = emails
+      .map(e => String(e).trim().toLowerCase())
+      .filter(e => e && e !== SUPER_ADMIN_EMAIL.toLowerCase());
+
+    if (targetEmails.length === 0) {
+      return res.status(400).json({ success: false, message: '所选用户中无有效可删除账号（超级管理员受系统保护）' });
+    }
+
+    // 1. Delete from memory
+    for (const em of targetEmails) {
+      const idx = memoryUsers.findIndex(u => u.email?.toLowerCase() === em);
+      if (idx !== -1) {
+        memoryUsers.splice(idx, 1);
+      }
+      memoryAdmins.delete(em);
+    }
+
+    // 2. Delete from MongoDB
+    let deletedCount = 0;
+    try {
+      const db = await getDb();
+      const regexes = targetEmails.map(e => new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
+      const r = await db.collection('users').deleteMany({
+        $or: [
+          { email: { $in: targetEmails } },
+          { email: { $in: regexes } }
+        ]
+      });
+      deletedCount = r.deletedCount || targetEmails.length;
+      await db.collection('admins').deleteMany({
+        $or: [
+          { email: { $in: targetEmails } },
+          { email: { $in: regexes } }
+        ]
+      });
+    } catch (dbErr) {
+      console.error('Mongo batch delete users error:', dbErr);
+      deletedCount = targetEmails.length;
+    }
+
+    res.json({
+      success: true,
+      message: `成功删除 ${deletedCount} 个注册用户`,
+      deletedCount
+    });
+  } catch (err: any) {
+    console.error('Batch delete users error:', err);
+    res.status(500).json({ success: false, message: '批量删除用户失败' });
   }
 });
 

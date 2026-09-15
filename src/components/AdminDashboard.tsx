@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Users,
   Key,
@@ -25,10 +25,16 @@ import {
   Database,
   Activity,
   Server,
-  Info
+  Info,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  UserX
 } from 'lucide-react';
 import {
   apiGetAdminUsers,
+  apiDeleteUser,
+  apiBatchDeleteUsers,
   apiGetAdmins,
   apiAddAdmin,
   apiRemoveAdmin,
@@ -73,10 +79,12 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
   const [genCount, setGenCount] = useState(1);
   const [genRemark, setGenRemark] = useState('');
   const [codeFilter, setCodeFilter] = useState<'all' | 'unused' | 'used'>('all');
+  const [selectedCodes, setSelectedCodes] = useState<string[]>([]);
 
   // 2. Users State
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [userSearch, setUserSearch] = useState('');
+  const [selectedUserEmails, setSelectedUserEmails] = useState<string[]>([]);
 
   // 3. Admins State
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
@@ -125,7 +133,6 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
     setLoading(true);
     setDbStatus('checking');
     try {
-      // Check database connection health
       checkDbHealth();
 
       const [uRes, aRes, iRes, pRes, oRes] = await Promise.all([
@@ -152,21 +159,57 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
     loadAllData();
   }, []);
 
-  // 1. Generate Invite Code Handler
+  // Filtered Invite Codes
+  const filteredCodes = inviteCodes.filter(c => {
+    if (codeFilter === 'unused') return c.status === 'unused';
+    if (codeFilter === 'used') return c.status === 'used';
+    return true;
+  });
+
+  // Filtered Users
+  const filteredUsers = users.filter(u => {
+    const s = userSearch.toLowerCase().trim();
+    if (!s) return true;
+    return (
+      (u.email && u.email.toLowerCase().includes(s)) ||
+      (u.name && u.name.toLowerCase().includes(s)) ||
+      (u.inviteCodeUsed && u.inviteCodeUsed.toLowerCase().includes(s))
+    );
+  });
+
+  // ================= 邀请码批量选择逻辑 =================
+  const handleToggleCode = (code: string) => {
+    setSelectedCodes(prev =>
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+    );
+  };
+
+  const handleSelectAllCodes = () => {
+    const allFiltered = filteredCodes.map(c => c.code);
+    const isAllSelected = allFiltered.length > 0 && allFiltered.every(c => selectedCodes.includes(c));
+    if (isAllSelected) {
+      setSelectedCodes(prev => prev.filter(c => !allFiltered.includes(c)));
+    } else {
+      const combined = Array.from(new Set([...selectedCodes, ...allFiltered]));
+      setSelectedCodes(combined);
+    }
+  };
+
+  // 1. Generate Invite Codes Handler
   const handleGenerateCodes = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (genCount < 1) return;
     setLoading(true);
     const res = await apiGenerateInviteCodes({
       count: genCount,
-      remark: genRemark || '管理员手动生成',
-      createdBy: currentEmail,
+      remark: genRemark.trim() || '管理员手动批量生成',
+      createdBy: currentEmail || 'Admin'
     });
     setLoading(false);
 
     if (res.success) {
       showNotice(res.message);
       setGenRemark('');
-      // Reload codes
       const iRes = await apiGetInviteCodes();
       if (iRes.success && iRes.inviteCodes) setInviteCodes(iRes.inviteCodes);
     } else {
@@ -174,11 +217,11 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
     }
   };
 
-  // Delete Invite Code (Safe in-app modal)
+  // Delete an individual invite code
   const promptDeleteCode = (code: string) => {
     setConfirmModal({
-      title: '删除并作废邀请码',
-      description: `确定要永久删除邀请码【${code}】吗？删除后该邀请码将立即失效并从系统库中清除。`,
+      title: '删除邀请码',
+      description: `确定要作废并彻底删除邀请码【${code}】吗？删除后此码将无法再被用于注册。`,
       confirmText: '确认删除',
       danger: true,
       onConfirm: async () => {
@@ -187,9 +230,39 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
         const res = await apiDeleteInviteCode(code);
         setLoading(false);
         if (res.success) {
-          showNotice(`邀请码【${code}】已成功删除`);
+          showNotice(res.message);
           setInviteCodes(prev => prev.filter(c => c.code !== code));
+          setSelectedCodes(prev => prev.filter(c => c !== code));
           setOrders(prev => prev.map(o => o.inviteCode === code ? { ...o, inviteCodeStatus: 'deleted' } : o));
+        } else {
+          showNotice(res.message, 'error');
+        }
+      }
+    });
+  };
+
+  // Batch delete selected invite codes
+  const promptBatchDeleteSelectedCodes = () => {
+    if (selectedCodes.length === 0) {
+      showNotice('请先勾选需要删除的邀请码', 'error');
+      return;
+    }
+    setConfirmModal({
+      title: '批量删除所选邀请码',
+      description: `确定要彻底删除已勾选的 ${selectedCodes.length} 个邀请码吗？删除后这些邀请码将立即从数据库清除并作废。`,
+      confirmText: `确认删除 (${selectedCodes.length}项)`,
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setLoading(true);
+        const res = await apiBatchDeleteInviteCodes({ codes: selectedCodes });
+        setLoading(false);
+        if (res.success) {
+          showNotice(res.message || `成功删除 ${selectedCodes.length} 个邀请码`);
+          const target = [...selectedCodes];
+          setInviteCodes(prev => prev.filter(c => !target.includes(c.code)));
+          setSelectedCodes([]);
+          setOrders(prev => prev.map(o => target.includes(o.inviteCode) ? { ...o, inviteCodeStatus: 'deleted' } : o));
         } else {
           showNotice(res.message, 'error');
         }
@@ -217,7 +290,95 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
         if (res.success) {
           showNotice(res.message);
           setInviteCodes(prev => prev.filter(c => c.status !== 'unused'));
+          setSelectedCodes(prev => prev.filter(code => {
+            const found = inviteCodes.find(c => c.code === code);
+            return found ? found.status !== 'unused' : false;
+          }));
           setOrders(prev => prev.map(o => ({ ...o, inviteCodeStatus: 'deleted' })));
+        } else {
+          showNotice(res.message, 'error');
+        }
+      }
+    });
+  };
+
+  // ================= 用户删除与批量选择逻辑 =================
+  const isSuperAdminEmail = (email?: string) => {
+    return email && email.toLowerCase() === 'skot_catan@163.com';
+  };
+
+  const handleToggleUser = (email: string) => {
+    if (isSuperAdminEmail(email)) return;
+    setSelectedUserEmails(prev =>
+      prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]
+    );
+  };
+
+  const handleSelectAllUsers = () => {
+    const selectableUsers = filteredUsers
+      .filter(u => u.email && !isSuperAdminEmail(u.email))
+      .map(u => u.email);
+    
+    const isAllSelected = selectableUsers.length > 0 && selectableUsers.every(e => selectedUserEmails.includes(e));
+    if (isAllSelected) {
+      setSelectedUserEmails(prev => prev.filter(e => !selectableUsers.includes(e)));
+    } else {
+      const combined = Array.from(new Set([...selectedUserEmails, ...selectableUsers]));
+      setSelectedUserEmails(combined);
+    }
+  };
+
+  // Delete an individual user
+  const promptDeleteUser = (email: string, name?: string) => {
+    if (isSuperAdminEmail(email)) {
+      showNotice('超级管理员账号受系统保护，不可删除', 'error');
+      return;
+    }
+    setConfirmModal({
+      title: '删除注册用户',
+      description: `确定要彻底删除用户【${email}】${name ? `(${name})` : ''} 吗？删除后该用户将无法再登录系统，相关记录将同步清除。`,
+      confirmText: '确认删除用户',
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setLoading(true);
+        const res = await apiDeleteUser(email);
+        setLoading(false);
+        if (res.success) {
+          showNotice(res.message);
+          setUsers(prev => prev.filter(u => u.email.toLowerCase() !== email.toLowerCase()));
+          setSelectedUserEmails(prev => prev.filter(e => e.toLowerCase() !== email.toLowerCase()));
+          // If was admin, remove from admins list too
+          setAdmins(prev => prev.filter(a => a.email.toLowerCase() !== email.toLowerCase()));
+        } else {
+          showNotice(res.message, 'error');
+        }
+      }
+    });
+  };
+
+  // Batch delete selected users
+  const promptBatchDeleteSelectedUsers = () => {
+    if (selectedUserEmails.length === 0) {
+      showNotice('请先勾选需要删除的用户', 'error');
+      return;
+    }
+    setConfirmModal({
+      title: '批量删除所选用户',
+      description: `确定要彻底删除已勾选的 ${selectedUserEmails.length} 个注册用户账号吗？此操作不可逆，删除后这些用户将无法继续登录。`,
+      confirmText: `确认删除 (${selectedUserEmails.length}个用户)`,
+      danger: true,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setLoading(true);
+        const res = await apiBatchDeleteUsers(selectedUserEmails);
+        setLoading(false);
+        if (res.success) {
+          showNotice(res.message || `成功删除 ${selectedUserEmails.length} 个用户`);
+          const target = selectedUserEmails.map(e => e.toLowerCase());
+          setUsers(prev => prev.filter(u => !target.includes(u.email.toLowerCase())));
+          setAdmins(prev => prev.filter(a => !target.includes(a.email.toLowerCase())));
+          setSelectedUserEmails([]);
         } else {
           showNotice(res.message, 'error');
         }
@@ -241,6 +402,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
           showNotice('订单及对应未使用邀请码已删除');
           setOrders(prev => prev.filter(o => o.orderId !== orderId));
           setInviteCodes(prev => prev.filter(c => !(c.code === inviteCode && c.status === 'unused')));
+          setSelectedCodes(prev => prev.filter(c => c !== inviteCode));
         } else {
           showNotice(res.message, 'error');
         }
@@ -271,7 +433,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
 
   // Remove Admin Handler (Safe in-app modal)
   const promptRemoveAdmin = (email: string) => {
-    if (email.toLowerCase() === 'skot_catan@163.com') {
+    if (isSuperAdminEmail(email)) {
       showNotice('超级管理员不可移除', 'error');
       return;
     }
@@ -334,86 +496,85 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
     setTimeout(() => setCopiedCode(null), 1800);
   };
 
-  // Filtered Invite Codes
-  const filteredCodes = inviteCodes.filter(c => {
-    if (codeFilter === 'unused') return c.status === 'unused';
-    if (codeFilter === 'used') return c.status === 'used';
-    return true;
-  });
+  // Select-All status calculation for invite codes
+  const filteredCodeStrings = filteredCodes.map(c => c.code);
+  const isAllCodesSelected = filteredCodeStrings.length > 0 && filteredCodeStrings.every(c => selectedCodes.includes(c));
+  const isSomeCodesSelected = filteredCodeStrings.some(c => selectedCodes.includes(c)) && !isAllCodesSelected;
 
-  // Filtered Users
-  const filteredUsers = users.filter(u => {
-    const s = userSearch.toLowerCase();
-    return u.email.toLowerCase().includes(s) || (u.name && u.name.toLowerCase().includes(s));
-  });
+  // Select-All status calculation for users
+  const selectableUserEmails = filteredUsers
+    .filter(u => u.email && !isSuperAdminEmail(u.email))
+    .map(u => u.email);
+  const isAllUsersSelected = selectableUserEmails.length > 0 && selectableUserEmails.every(e => selectedUserEmails.includes(e));
+  const isSomeUsersSelected = selectableUserEmails.some(e => selectedUserEmails.includes(e)) && !isAllUsersSelected;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-950/85 backdrop-blur-md font-sans">
-      <div className="w-full max-w-5xl h-[92vh] bg-slate-900 border border-slate-800 rounded-3xl flex flex-col shadow-2xl overflow-hidden text-slate-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-slate-900/50 backdrop-blur-sm font-sans">
+      <div className="w-full max-w-5xl h-[92vh] bg-white border border-slate-200 rounded-3xl flex flex-col shadow-2xl overflow-hidden text-slate-800">
         
-        {/* Top Navigation Bar */}
-        <div className="px-6 py-4 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between shrink-0">
+        {/* Top Navigation Bar - Light theme */}
+        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/90 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200 shadow-sm">
               <ShieldCheck size={22} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-white tracking-tight">
+                <h2 className="text-lg font-bold text-slate-900 tracking-tight">
                   系统管理控制台
                 </h2>
-                <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[11px] font-semibold">
+                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-semibold">
                   管理员专属
                 </span>
                 {dbStatus === 'connected' ? (
                   <button
                     type="button"
                     onClick={() => { checkDbHealth(); setShowDbModal(true); }}
-                    className="px-2.5 py-1 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5 border border-emerald-500/30 transition-all cursor-pointer group"
+                    className="px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-semibold flex items-center gap-1.5 border border-emerald-200 transition-all cursor-pointer group shadow-sm"
                     title="点击查看数据库连接自检详情"
                   >
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span>数据库已连接</span>
                     {dbDiagnostics?.latencyMs !== undefined && (
-                      <span className="text-[10px] text-emerald-400/80 font-mono">({dbDiagnostics.latencyMs}ms)</span>
+                      <span className="text-[10px] text-emerald-600 font-mono">({dbDiagnostics.latencyMs}ms)</span>
                     )}
-                    <Info size={11} className="text-emerald-400/70 group-hover:text-emerald-300" />
+                    <Info size={11} className="text-emerald-500 group-hover:text-emerald-700" />
                   </button>
                 ) : dbStatus === 'disconnected' ? (
                   <button
                     type="button"
                     onClick={() => { checkDbHealth(); setShowDbModal(true); }}
-                    className="px-2.5 py-1 rounded-full bg-red-500/15 hover:bg-red-500/25 text-red-300 text-[11px] font-semibold flex items-center gap-1.5 border border-red-500/30 transition-all cursor-pointer group"
+                    className="px-2.5 py-1 rounded-full bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-semibold flex items-center gap-1.5 border border-red-200 transition-all cursor-pointer group shadow-sm"
                     title="点击查看异常自检详情"
                   >
-                    <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
                     <span>数据库未连接</span>
-                    <Info size={11} className="text-red-400/70 group-hover:text-red-300" />
+                    <Info size={11} className="text-red-500 group-hover:text-red-700" />
                   </button>
                 ) : (
-                  <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 text-[11px] font-semibold flex items-center gap-1.5 border border-slate-700 animate-pulse">
-                    <RefreshCw size={10} className="animate-spin text-blue-400" /> 数据库自检中
+                  <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[11px] font-semibold flex items-center gap-1.5 border border-slate-200 animate-pulse">
+                    <RefreshCw size={10} className="animate-spin text-blue-600" /> 数据库自检中
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-400">
-                当前登录：<span className="text-slate-200 font-mono">{currentEmail}</span>
+              <p className="text-xs text-slate-500">
+                当前登录账号：<span className="text-slate-800 font-mono font-medium">{currentEmail}</span>
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={loadAllData}
               disabled={loading}
               title="刷新数据"
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+              className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-sm transition-colors cursor-pointer"
             >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              <RefreshCw size={16} className={loading ? 'animate-spin text-blue-600' : ''} />
             </button>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-red-950/60 hover:text-red-400 text-slate-300 transition-colors cursor-pointer"
+              className="p-2 rounded-xl bg-white hover:bg-red-50 hover:text-red-600 text-slate-600 border border-slate-200 shadow-sm transition-colors cursor-pointer"
               title="退出管理后台"
             >
               <X size={18} />
@@ -425,8 +586,8 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
         {feedback && (
           <div className={`px-4 py-2 text-xs font-medium text-center flex items-center justify-center gap-2 transition-all ${
             feedback.type === 'success' 
-              ? 'bg-emerald-950 text-emerald-300 border-b border-emerald-800' 
-              : 'bg-red-950 text-red-300 border-b border-red-800'
+              ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200' 
+              : 'bg-red-50 text-red-800 border-b border-red-200'
           }`}>
             <CheckCircle2 size={14} />
             <span>{feedback.message}</span>
@@ -434,18 +595,20 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
         )}
 
         {/* Tabs Bar */}
-        <div className="flex border-b border-slate-800 bg-slate-900/90 px-6 gap-2 shrink-0">
+        <div className="flex border-b border-slate-200 bg-white px-6 gap-2 shrink-0">
           <button
             onClick={() => setActiveTab('invite')}
             className={`py-3.5 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'invite'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-900'
             }`}
           >
             <Key size={15} />
             <span>邀请码管理</span>
-            <span className="px-1.5 py-0.2 bg-slate-800 rounded-full text-[10px] text-slate-300">
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+              activeTab === 'invite' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
+            }`}>
               {inviteCodes.length}
             </span>
           </button>
@@ -454,13 +617,15 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
             onClick={() => setActiveTab('users')}
             className={`py-3.5 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'users'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-900'
             }`}
           >
             <Users size={15} />
-            <span>注册账户信息</span>
-            <span className="px-1.5 py-0.2 bg-slate-800 rounded-full text-[10px] text-slate-300">
+            <span>注册用户管理</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+              activeTab === 'users' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
+            }`}>
               {users.length}
             </span>
           </button>
@@ -469,13 +634,15 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
             onClick={() => setActiveTab('admins')}
             className={`py-3.5 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'admins'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-900'
             }`}
           >
             <ShieldCheck size={15} />
             <span>管理员账号设置</span>
-            <span className="px-1.5 py-0.2 bg-slate-800 rounded-full text-[10px] text-slate-300">
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+              activeTab === 'admins' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
+            }`}>
               {admins.length}
             </span>
           </button>
@@ -484,8 +651,8 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
             onClick={() => setActiveTab('payment')}
             className={`py-3.5 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'payment'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-900'
             }`}
           >
             <CreditCard size={15} />
@@ -494,43 +661,43 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
         </div>
 
         {/* Tab Contents */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
           
           {/* ================= TAB 1: INVITE CODES ================= */}
           {activeTab === 'invite' && (
             <div className="space-y-6">
               
               {/* Manual Generator Card */}
-              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-5">
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Sparkles size={16} className="text-amber-400" />
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Sparkles size={16} className="text-amber-500" />
                     <span>手动批量生成注册邀请码</span>
                   </h3>
-                  <span className="text-xs text-slate-400">一个邀请码仅限注册一次，注册后系统自动作废</span>
+                  <span className="text-xs text-slate-500">一个邀请码仅限注册一次，注册后系统自动作废</span>
                 </div>
 
                 <form onSubmit={handleGenerateCodes} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                   <div className="md:col-span-3 space-y-1">
-                    <label className="text-xs text-slate-400 font-medium">生成数量 (1~50)</label>
+                    <label className="text-xs text-slate-600 font-medium">生成数量 (1~50)</label>
                     <input
                       type="number"
                       min={1}
                       max={50}
                       value={genCount}
                       onChange={(e) => setGenCount(parseInt(e.target.value, 10) || 1)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:outline-none focus:border-blue-500 focus:bg-white"
                     />
                   </div>
 
                   <div className="md:col-span-6 space-y-1">
-                    <label className="text-xs text-slate-400 font-medium">用途备注说明</label>
+                    <label className="text-xs text-slate-600 font-medium">用途备注说明</label>
                     <input
                       type="text"
                       placeholder="例如：电气一班教学专享 / 学员小李"
                       value={genRemark}
                       onChange={(e) => setGenRemark(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400"
                     />
                   </div>
 
@@ -538,7 +705,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
                     >
                       <Plus size={15} />
                       <span>{loading ? '正在生成...' : '立即生成邀请码'}</span>
@@ -547,15 +714,15 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                 </form>
               </div>
 
-              {/* Codes Table Header & Filters */}
+              {/* Codes Table Header, Filters & Batch Actions */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-slate-400">状态筛选：</span>
-                  <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                  <span className="text-xs text-slate-500 font-medium">状态筛选：</span>
+                  <div className="flex bg-white p-1 rounded-xl border border-slate-200 text-xs shadow-sm">
                     <button
                       onClick={() => setCodeFilter('all')}
                       className={`px-3 py-1 rounded-lg cursor-pointer transition-colors ${
-                        codeFilter === 'all' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                        codeFilter === 'all' ? 'bg-slate-800 text-white font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       全部 ({inviteCodes.length})
@@ -563,7 +730,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                     <button
                       onClick={() => setCodeFilter('unused')}
                       className={`px-3 py-1 rounded-lg cursor-pointer transition-colors ${
-                        codeFilter === 'unused' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                        codeFilter === 'unused' ? 'bg-emerald-600 text-white font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       未使用 ({inviteCodes.filter(c => c.status === 'unused').length})
@@ -571,7 +738,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                     <button
                       onClick={() => setCodeFilter('used')}
                       className={`px-3 py-1 rounded-lg cursor-pointer transition-colors ${
-                        codeFilter === 'used' ? 'bg-slate-800 text-slate-300 font-bold' : 'text-slate-400 hover:text-white'
+                        codeFilter === 'used' ? 'bg-slate-200 text-slate-800 font-bold' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       已失效/已使用 ({inviteCodes.filter(c => c.status === 'used').length})
@@ -579,12 +746,22 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                  {selectedCodes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={promptBatchDeleteSelectedCodes}
+                      className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm animate-in fade-in"
+                    >
+                      <Trash2 size={13} />
+                      <span>批量删除选中 ({selectedCodes.length})</span>
+                    </button>
+                  )}
                   {inviteCodes.filter(c => c.status === 'unused').length > 0 && (
                     <button
                       type="button"
                       onClick={promptBatchDeleteUnused}
-                      className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                      className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
                       title="快速清空所有未使用的邀请码"
                     >
                       <Trash2 size={13} />
@@ -598,11 +775,27 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
               </div>
 
               {/* Table */}
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl overflow-hidden">
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800 bg-slate-900/80 text-slate-400">
+                      <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-600">
+                        <th className="py-3 px-4 w-10 text-center">
+                          <button
+                            type="button"
+                            onClick={handleSelectAllCodes}
+                            className="text-slate-500 hover:text-blue-600 cursor-pointer flex items-center justify-center"
+                            title={isAllCodesSelected ? '取消全选' : '全选当前列表'}
+                          >
+                            {isAllCodesSelected ? (
+                              <CheckSquare size={16} className="text-blue-600" />
+                            ) : isSomeCodesSelected ? (
+                              <MinusSquare size={16} className="text-blue-600" />
+                            ) : (
+                              <Square size={16} />
+                            )}
+                          </button>
+                        </th>
                         <th className="py-3 px-4 font-semibold">邀请码</th>
                         <th className="py-3 px-4 font-semibold">来源类型</th>
                         <th className="py-3 px-4 font-semibold">状态</th>
@@ -612,76 +805,95 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                         <th className="py-3 px-4 font-semibold text-right">操作</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60">
+                    <tbody className="divide-y divide-slate-100">
                       {filteredCodes.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-10 text-center text-slate-500">
+                          <td colSpan={8} className="py-10 text-center text-slate-400">
                             暂无邀请码记录，请点击上方按钮生成！
                           </td>
                         </tr>
                       ) : (
-                        filteredCodes.map((item) => (
-                          <tr key={item.id || item.code} className="hover:bg-slate-900/40 transition-colors">
-                            <td className="py-3 px-4 font-mono font-bold text-blue-400 flex items-center gap-2">
-                              <span>{item.code}</span>
-                              <button
-                                onClick={() => copyCode(item.code)}
-                                title="复制邀请码"
-                                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
-                              >
-                                {copiedCode === item.code ? (
-                                  <Check size={12} className="text-emerald-400" />
+                        filteredCodes.map((item) => {
+                          const isSelected = selectedCodes.includes(item.code);
+                          return (
+                            <tr 
+                              key={item.id || item.code} 
+                              className={`transition-colors ${isSelected ? 'bg-blue-50/60' : 'hover:bg-slate-50/80'}`}
+                            >
+                              <td className="py-3 px-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleCode(item.code)}
+                                  className="text-slate-400 hover:text-blue-600 cursor-pointer flex items-center justify-center"
+                                >
+                                  {isSelected ? (
+                                    <CheckSquare size={16} className="text-blue-600" />
+                                  ) : (
+                                    <Square size={16} />
+                                  )}
+                                </button>
+                              </td>
+                              <td className="py-3 px-4 font-mono font-bold text-blue-600 flex items-center gap-2">
+                                <span>{item.code}</span>
+                                <button
+                                  onClick={() => copyCode(item.code)}
+                                  title="复制邀请码"
+                                  className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer transition-colors"
+                                >
+                                  {copiedCode === item.code ? (
+                                    <Check size={12} className="text-emerald-600" />
+                                  ) : (
+                                    <Copy size={12} />
+                                  )}
+                                </button>
+                              </td>
+                              <td className="py-3 px-4 text-slate-600">
+                                {item.type === 'purchased' ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-medium">
+                                    在线购买
+                                  </span>
                                 ) : (
-                                  <Copy size={12} />
+                                  <span className="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[10px] font-medium">
+                                    管理员手动
+                                  </span>
                                 )}
-                              </button>
-                            </td>
-                            <td className="py-3 px-4 text-slate-300">
-                              {item.type === 'purchased' ? (
-                                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px]">
-                                  在线购买
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px]">
-                                  管理员手动
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4">
-                              {item.status === 'unused' ? (
-                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">
-                                  有效 · 未使用
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px]">
-                                  已使用 · 已失效
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-slate-300 font-mono">
-                              {item.usedBy ? (
-                                <span className="text-white font-medium">{item.usedBy}</span>
-                              ) : (
-                                <span className="text-slate-600">—</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-slate-400 max-w-xs truncate">
-                              {item.remark || '—'}
-                            </td>
-                            <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
-                              {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
-                            </td>
-                            <td className="py-3 px-4 text-right">
-                              <button
-                                onClick={() => promptDeleteCode(item.code)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-950/50 transition-colors cursor-pointer"
-                                title="删除并作废该码"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                              </td>
+                              <td className="py-3 px-4">
+                                {item.status === 'unused' ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                                    有效 · 未使用
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px]">
+                                    已使用 · 已失效
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-slate-700 font-mono">
+                                {item.usedBy ? (
+                                  <span className="text-slate-900 font-medium">{item.usedBy}</span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 max-w-xs truncate">
+                                {item.remark || '—'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
+                                {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <button
+                                  onClick={() => promptDeleteCode(item.code)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                                  title="删除并作废该码"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -696,78 +908,148 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
             <div className="space-y-5">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="relative w-full sm:w-80">
-                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="按邮箱或姓名搜索用户..."
+                    placeholder="按邮箱、姓名或邀请码搜索用户..."
                     value={userSearch}
                     onChange={(e) => setUserSearch(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-blue-500"
+                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 text-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 shadow-sm"
                   />
                 </div>
-                <div className="text-xs text-slate-400">
-                  总注册学员数：<span className="font-bold text-blue-400">{users.length}</span> 人
+                
+                <div className="flex items-center gap-3">
+                  {selectedUserEmails.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={promptBatchDeleteSelectedUsers}
+                      className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm animate-in fade-in"
+                    >
+                      <Trash2 size={13} />
+                      <span>批量删除用户 ({selectedUserEmails.length})</span>
+                    </button>
+                  )}
+                  <div className="text-xs text-slate-500 font-medium">
+                    总注册用户数：<span className="font-bold text-blue-600">{users.length}</span> 人
+                  </div>
                 </div>
               </div>
 
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl overflow-hidden">
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800 bg-slate-900/80 text-slate-400">
-                        <th className="py-3 px-4 font-semibold">学员邮箱</th>
-                        <th className="py-3 px-4 font-semibold">学员姓名/昵称</th>
+                      <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-600">
+                        <th className="py-3 px-4 w-10 text-center">
+                          <button
+                            type="button"
+                            onClick={handleSelectAllUsers}
+                            className="text-slate-500 hover:text-blue-600 cursor-pointer flex items-center justify-center"
+                            title={isAllUsersSelected ? '取消全选' : '全选当前可删除用户'}
+                          >
+                            {isAllUsersSelected ? (
+                              <CheckSquare size={16} className="text-blue-600" />
+                            ) : isSomeUsersSelected ? (
+                              <MinusSquare size={16} className="text-blue-600" />
+                            ) : (
+                              <Square size={16} />
+                            )}
+                          </button>
+                        </th>
+                        <th className="py-3 px-4 font-semibold">用户邮箱</th>
+                        <th className="py-3 px-4 font-semibold">姓名 / 昵称</th>
                         <th className="py-3 px-4 font-semibold">账户权限</th>
                         <th className="py-3 px-4 font-semibold">注册所用邀请码</th>
                         <th className="py-3 px-4 font-semibold">注册时间</th>
+                        <th className="py-3 px-4 font-semibold text-right">操作</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60">
+                    <tbody className="divide-y divide-slate-100">
                       {filteredUsers.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="py-10 text-center text-slate-500">
+                          <td colSpan={7} className="py-10 text-center text-slate-400">
                             未匹配到用户账号
                           </td>
                         </tr>
                       ) : (
-                        filteredUsers.map((u, idx) => (
-                          <tr key={u.email || idx} className="hover:bg-slate-900/40 transition-colors">
-                            <td className="py-3 px-4 font-mono font-medium text-white">
-                              {u.email}
-                              {u.email.toLowerCase() === 'skot_catan@163.com' && (
-                                <span className="ml-2 px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px]">
-                                  超级管理员
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-slate-300">
-                              {u.name || '—'}
-                            </td>
-                            <td className="py-3 px-4">
-                              {u.role === 'admin' ? (
-                                <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-bold">
-                                  管理员
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px]">
-                                  学员
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 font-mono text-slate-300">
-                              {u.inviteCodeUsed ? (
-                                <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-400 text-[11px]">
-                                  {u.inviteCodeUsed}
-                                </span>
-                              ) : (
-                                <span className="text-slate-600">系统直通</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
-                              {u.createdAt ? new Date(u.createdAt).toLocaleString() : '—'}
-                            </td>
-                          </tr>
-                        ))
+                        filteredUsers.map((u, idx) => {
+                          const isSuper = isSuperAdminEmail(u.email);
+                          const isSelected = selectedUserEmails.includes(u.email);
+                          return (
+                            <tr 
+                              key={u.email || idx} 
+                              className={`transition-colors ${isSelected ? 'bg-blue-50/60' : 'hover:bg-slate-50/80'}`}
+                            >
+                              <td className="py-3 px-4 text-center">
+                                {isSuper ? (
+                                  <span className="text-slate-300 select-none">—</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleUser(u.email)}
+                                    className="text-slate-400 hover:text-blue-600 cursor-pointer flex items-center justify-center"
+                                  >
+                                    {isSelected ? (
+                                      <CheckSquare size={16} className="text-blue-600" />
+                                    ) : (
+                                      <Square size={16} />
+                                    )}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 font-mono font-medium text-slate-900">
+                                <div className="flex items-center gap-2">
+                                  <span>{u.email}</span>
+                                  {isSuper && (
+                                    <span className="px-2 py-0.2 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-200">
+                                      超级管理员 (保护)
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-slate-700">
+                                {u.name || '—'}
+                              </td>
+                              <td className="py-3 px-4">
+                                {u.role === 'admin' ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[10px] font-bold">
+                                    管理员
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px]">
+                                    学员
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 font-mono text-slate-700">
+                                {u.inviteCodeUsed ? (
+                                  <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-amber-700 text-[11px] font-semibold">
+                                    {u.inviteCodeUsed}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">系统直通</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
+                                {u.createdAt ? new Date(u.createdAt).toLocaleString() : '—'}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                {isSuper ? (
+                                  <span className="text-[11px] text-slate-400">不可删除</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => promptDeleteUser(u.email, u.name)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                                    title="删除该用户账号"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -781,13 +1063,13 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
             <div className="space-y-6">
               
               {/* Add Admin Form */}
-              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-5">
-                <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                  <ShieldCheck size={16} className="text-blue-400" />
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2">
+                  <ShieldCheck size={16} className="text-blue-600" />
                   <span>新增管理员邮箱账号</span>
                 </h3>
-                <p className="text-xs text-slate-400 mb-4">
-                  管理员拥有管理控制台访问权限，可手动生成邀请码、新增其他管理员、修改收款配置及查看所有用户账号。
+                <p className="text-xs text-slate-500 mb-4">
+                  管理员拥有管理控制台访问权限，可手动生成邀请码、新增其他管理员、修改收款配置及管理所有用户账号。
                 </p>
 
                 <form onSubmit={handleAddAdmin} className="flex gap-3 max-w-lg">
@@ -797,12 +1079,12 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                     placeholder="输入要设为管理员的邮箱（例如 teacher@school.edu）"
                     value={newAdminEmail}
                     onChange={(e) => setNewAdminEmail(e.target.value)}
-                    className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
+                    className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-xs focus:outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400"
                   />
                   <button
                     type="submit"
                     disabled={loading}
-                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-md shadow-blue-500/20 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 active:scale-[0.99]"
                   >
                     <Plus size={14} />
                     <span>添加为管理员</span>
@@ -811,28 +1093,28 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
               </div>
 
               {/* Admin Accounts List */}
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-300">当前活跃管理员列表</h4>
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                <div className="p-4 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-700">当前活跃管理员列表</h4>
                   <span className="text-[11px] text-slate-500">skot_catan@163.com 为超级管理员</span>
                 </div>
 
-                <div className="divide-y divide-slate-800/60">
+                <div className="divide-y divide-slate-100">
                   {admins.map((admin) => {
-                    const isSuper = admin.email.toLowerCase() === 'skot_catan@163.com';
+                    const isSuper = isSuperAdminEmail(admin.email);
                     return (
-                      <div key={admin.email} className="px-5 py-3.5 flex items-center justify-between hover:bg-slate-900/30 transition-colors">
+                      <div key={admin.email} className="px-5 py-3.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
-                            isSuper ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-blue-500/20 text-blue-300'
+                            isSuper ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-blue-100 text-blue-700'
                           }`}>
                             {isSuper ? '超管' : '管理'}
                           </div>
                           <div>
-                            <div className="font-mono text-sm font-semibold text-white flex items-center gap-2">
+                            <div className="font-mono text-sm font-semibold text-slate-900 flex items-center gap-2">
                               <span>{admin.email}</span>
                               {isSuper && (
-                                <span className="px-2 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold">
+                                <span className="px-2 py-0.2 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-200">
                                   超级管理员 (受保护)
                                 </span>
                               )}
@@ -847,7 +1129,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                           {!isSuper && (
                             <button
                               onClick={() => promptRemoveAdmin(admin.email)}
-                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-300 text-xs transition-colors flex items-center gap-1 cursor-pointer"
+                              className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-700 text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
                             >
                               <Trash2 size={13} />
                               <span>解除管理员</span>
@@ -868,21 +1150,21 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
             <div className="space-y-6">
               
               {/* Payment Settings Form */}
-              <form onSubmit={handleSavePaymentConfig} className="bg-slate-950/70 border border-slate-800 rounded-2xl p-5 space-y-5">
+              <form onSubmit={handleSavePaymentConfig} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <CreditCard size={16} className="text-emerald-400" />
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <CreditCard size={16} className="text-emerald-600" />
                       <span>微信 / 支付宝收款配置</span>
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                       可直接上传您的微信/支付宝个人收钱码或赞赏码图片，保存后将在前端购买邀请码窗口即时显示。
                     </p>
                   </div>
                   <button
                     type="submit"
                     disabled={loading}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.99]"
                   >
                     <Check size={14} />
                     <span>保存收款配置</span>
@@ -892,7 +1174,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                 {/* Price Setting */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300">
+                    <label className="text-xs font-semibold text-slate-700">
                       邀请码购买价格 (元)
                     </label>
                     <div className="relative">
@@ -903,13 +1185,13 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                         min="0.01"
                         value={paymentConfig.price}
                         onChange={(e) => setPaymentConfig(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                        className="w-full pl-8 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white font-bold text-sm focus:outline-none focus:border-emerald-500"
+                        className="w-full pl-8 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold text-sm focus:outline-none focus:border-emerald-500 focus:bg-white"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300">
+                    <label className="text-xs font-semibold text-slate-700">
                       扫码付款提示文案
                     </label>
                     <input
@@ -917,7 +1199,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                       value={paymentConfig.instruction}
                       onChange={(e) => setPaymentConfig(prev => ({ ...prev, instruction: e.target.value }))}
                       placeholder="例如：付款时可留空备注，支付完成后点击下方【我已完成支付】即可自动出码"
-                      className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-xs focus:outline-none focus:border-emerald-500 focus:bg-white"
                     />
                   </div>
                 </div>
@@ -926,9 +1208,9 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
                   
                   {/* WeChat QR Card */}
-                  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col items-center">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col items-center">
                     <div className="w-full flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
                         <QrCode size={15} />
                         微信收款码 (赞赏码/收钱码)
                       </span>
@@ -936,14 +1218,14 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                         <button
                           type="button"
                           onClick={() => setPaymentConfig(prev => ({ ...prev, wechatQr: '' }))}
-                          className="text-[11px] text-red-400 hover:underline cursor-pointer"
+                          className="text-[11px] text-red-600 hover:underline cursor-pointer"
                         >
                           清除重传
                         </button>
                       )}
                     </div>
 
-                    <div className="w-40 h-40 bg-white rounded-xl p-2 mb-3 flex items-center justify-center border border-slate-700 shadow-inner overflow-hidden">
+                    <div className="w-40 h-40 bg-white rounded-xl p-2 mb-3 flex items-center justify-center border border-slate-200 shadow-inner overflow-hidden">
                       {paymentConfig.wechatQr ? (
                         <img 
                           src={paymentConfig.wechatQr} 
@@ -953,13 +1235,13 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                       ) : (
                         <div className="flex flex-col items-center text-slate-400 p-2 text-center">
                           <ImageIcon size={32} className="text-slate-300 mb-1" />
-                          <span className="text-[10px]">未上传收款码</span>
+                          <span className="text-[10px] text-slate-600 font-medium">未上传收款码</span>
                           <span className="text-[9px] text-slate-400">目前显示默认扫码图</span>
                         </div>
                       )}
                     </div>
 
-                    <label className="w-full py-2 bg-emerald-700/30 hover:bg-emerald-700/50 text-emerald-300 border border-emerald-600/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                    <label className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-sm">
                       <Upload size={13} />
                       <span>上传微信收款图片</span>
                       <input
@@ -972,9 +1254,9 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                   </div>
 
                   {/* Alipay QR Card */}
-                  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col items-center">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col items-center">
                     <div className="w-full flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-blue-700 flex items-center gap-1.5">
                         <QrCode size={15} />
                         支付宝收款码 (商家码/收钱码)
                       </span>
@@ -982,14 +1264,14 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                         <button
                           type="button"
                           onClick={() => setPaymentConfig(prev => ({ ...prev, alipayQr: '' }))}
-                          className="text-[11px] text-red-400 hover:underline cursor-pointer"
+                          className="text-[11px] text-red-600 hover:underline cursor-pointer"
                         >
                           清除重传
                         </button>
                       )}
                     </div>
 
-                    <div className="w-40 h-40 bg-white rounded-xl p-2 mb-3 flex items-center justify-center border border-slate-700 shadow-inner overflow-hidden">
+                    <div className="w-40 h-40 bg-white rounded-xl p-2 mb-3 flex items-center justify-center border border-slate-200 shadow-inner overflow-hidden">
                       {paymentConfig.alipayQr ? (
                         <img 
                           src={paymentConfig.alipayQr} 
@@ -999,13 +1281,13 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                       ) : (
                         <div className="flex flex-col items-center text-slate-400 p-2 text-center">
                           <ImageIcon size={32} className="text-slate-300 mb-1" />
-                          <span className="text-[10px]">未上传收款码</span>
+                          <span className="text-[10px] text-slate-600 font-medium">未上传收款码</span>
                           <span className="text-[9px] text-slate-400">目前显示默认扫码图</span>
                         </div>
                       )}
                     </div>
 
-                    <label className="w-full py-2 bg-blue-700/30 hover:bg-blue-700/50 text-blue-300 border border-blue-600/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                    <label className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-sm">
                       <Upload size={13} />
                       <span>上传支付宝收款图片</span>
                       <input
@@ -1021,10 +1303,10 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
               </form>
 
               {/* Purchase Orders Record */}
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-slate-800 bg-slate-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                <div className="p-4 border-b border-slate-200 bg-slate-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h4 className="text-xs font-bold text-slate-300">在线购买出码记录流水</h4>
+                    <h4 className="text-xs font-bold text-slate-700">在线购买出码记录流水</h4>
                     <p className="text-[11px] text-slate-500 mt-0.5">学员在线扫码支付后系统自动签发的邀请码与订单明细</p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -1054,6 +1336,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                               if (res.success) {
                                 showNotice(res.message);
                                 setInviteCodes(prev => prev.filter(c => !unusedCodes.includes(c.code)));
+                                setSelectedCodes(prev => prev.filter(c => !unusedCodes.includes(c)));
                                 setOrders(prev => prev.map(o => unusedCodes.includes(o.inviteCode) ? { ...o, inviteCodeStatus: 'deleted' } : o));
                               } else {
                                 showNotice(res.message, 'error');
@@ -1061,21 +1344,21 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                             }
                           });
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                        className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
                         title="快速作废所有未使用的购买邀请码"
                       >
                         <Trash2 size={13} />
                         <span>作废所有未使用购买码</span>
                       </button>
                     )}
-                    <span className="text-[11px] text-slate-400">累计出码 {orders.length} 笔</span>
+                    <span className="text-[11px] text-slate-500 font-medium">累计出码 {orders.length} 笔</span>
                   </div>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800 bg-slate-900/80 text-slate-400">
+                      <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-600">
                         <th className="py-2.5 px-4 font-semibold">订单号</th>
                         <th className="py-2.5 px-4 font-semibold">支付通道</th>
                         <th className="py-2.5 px-4 font-semibold">金额</th>
@@ -1085,10 +1368,10 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                         <th className="py-2.5 px-4 font-semibold text-right">操作</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/60">
+                    <tbody className="divide-y divide-slate-100">
                       {orders.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-8 text-center text-slate-500">
+                          <td colSpan={7} className="py-8 text-center text-slate-400">
                             暂无在线购买订单记录
                           </td>
                         </tr>
@@ -1100,30 +1383,30 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                           const isCodeUnused = linkedCode && linkedCode.status === 'unused';
 
                           return (
-                            <tr key={o.orderId} className="hover:bg-slate-900/40">
-                              <td className="py-3 px-4 font-mono text-slate-300">{o.orderId}</td>
+                            <tr key={o.orderId} className="hover:bg-slate-50">
+                              <td className="py-3 px-4 font-mono text-slate-600">{o.orderId}</td>
                               <td className="py-3 px-4">
                                 {o.payMethod === 'wechat' ? (
-                                  <span className="text-emerald-400 font-medium">微信支付</span>
+                                  <span className="text-emerald-700 font-medium">微信支付</span>
                                 ) : (
-                                  <span className="text-blue-400 font-medium">支付宝</span>
+                                  <span className="text-blue-700 font-medium">支付宝</span>
                                 )}
                               </td>
-                              <td className="py-3 px-4 font-bold text-amber-400">¥{Number(o.amount).toFixed(2)}</td>
+                              <td className="py-3 px-4 font-bold text-amber-600">¥{Number(o.amount).toFixed(2)}</td>
                               <td className="py-3 px-4 font-mono font-bold">
                                 <div className="flex items-center gap-2">
-                                  <span className={isCodeDeleted ? 'text-slate-500 line-through' : 'text-blue-400'}>
+                                  <span className={isCodeDeleted ? 'text-slate-400 line-through' : 'text-blue-600'}>
                                     {o.inviteCode}
                                   </span>
                                   {!isCodeDeleted && (
                                     <button
                                       type="button"
                                       onClick={() => copyCode(o.inviteCode)}
-                                      className="text-slate-500 hover:text-white p-1 rounded transition-colors cursor-pointer"
+                                      className="text-slate-400 hover:text-slate-700 p-1 rounded transition-colors cursor-pointer"
                                       title="复制邀请码"
                                     >
                                       {copiedCode === o.inviteCode ? (
-                                        <Check size={12} className="text-emerald-400" />
+                                        <Check size={12} className="text-emerald-600" />
                                       ) : (
                                         <Copy size={12} />
                                       )}
@@ -1133,15 +1416,15 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                               </td>
                               <td className="py-3 px-4">
                                 {isCodeUsed ? (
-                                  <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[11px] font-medium">
+                                  <span className="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-medium">
                                     已使用 ({linkedCode?.usedBy || '学员'})
                                   </span>
                                 ) : isCodeDeleted ? (
-                                  <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[11px]">
+                                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px]">
                                     已作废/已删除
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-medium border border-emerald-500/30">
+                                  <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-medium border border-emerald-200">
                                     有效 · 未使用
                                   </span>
                                 )}
@@ -1155,7 +1438,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                                     <button
                                       type="button"
                                       onClick={() => promptDeleteCode(o.inviteCode)}
-                                      className="px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[11px] font-medium border border-red-500/20 transition-all cursor-pointer inline-flex items-center gap-1"
+                                      className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-medium border border-red-200 transition-all cursor-pointer inline-flex items-center gap-1 shadow-sm"
                                       title="作废并删除此邀请码"
                                     >
                                       <Trash2 size={11} />
@@ -1165,7 +1448,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                                   <button
                                     type="button"
                                     onClick={() => promptDeleteOrder(o.orderId, o.inviteCode)}
-                                    className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-950/50 transition-colors cursor-pointer"
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
                                     title="删除此笔订单流水"
                                   >
                                     <Trash2 size={13} />
@@ -1188,19 +1471,19 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
 
       </div>
 
-      {/* In-app Confirmation Dialog (Never blocked by iframe sandbox) */}
+      {/* In-app Confirmation Dialog - Light theme */}
       {confirmModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-800">
             <div className="flex items-start gap-3.5">
-              <div className={`p-2.5 rounded-xl shrink-0 ${confirmModal.danger ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
+              <div className={`p-2.5 rounded-xl shrink-0 ${confirmModal.danger ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-blue-50 text-blue-600 border border-blue-200'}`}>
                 <AlertTriangle size={22} />
               </div>
               <div className="space-y-1.5">
-                <h3 className="text-base font-bold text-white leading-tight">
+                <h3 className="text-base font-bold text-slate-900 leading-tight">
                   {confirmModal.title}
                 </h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
+                <p className="text-xs text-slate-600 leading-relaxed">
                   {confirmModal.description}
                 </p>
               </div>
@@ -1209,17 +1492,17 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
               <button
                 type="button"
                 onClick={() => setConfirmModal(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 bg-slate-50 border border-slate-200 transition-colors cursor-pointer"
               >
                 {confirmModal.cancelText || '取消'}
               </button>
               <button
                 type="button"
                 onClick={() => confirmModal.onConfirm()}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all cursor-pointer shadow-lg ${
+                className={`px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all cursor-pointer shadow-md ${
                   confirmModal.danger
-                    ? 'bg-red-600 hover:bg-red-500 shadow-red-900/30'
-                    : 'bg-blue-600 hover:bg-blue-500 shadow-blue-900/30'
+                    ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
+                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
                 }`}
               >
                 {confirmModal.confirmText || '确定'}
@@ -1229,25 +1512,25 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
         </div>
       )}
 
-      {/* Database Diagnostics & Health Modal */}
+      {/* Database Diagnostics & Health Modal - Light theme */}
       {showDbModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-200">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-800">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200 shadow-sm">
                   <Database size={20} />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                     数据库与服务健康自检报告
                   </h3>
-                  <p className="text-xs text-slate-400">实时检测云端持久化存储连接状态</p>
+                  <p className="text-xs text-slate-500">实时检测云端持久化存储连接状态</p>
                 </div>
               </div>
               <button
                 onClick={() => setShowDbModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -1255,25 +1538,25 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
 
             <div className="space-y-3">
               {/* Status Item: MongoDB Cluster */}
-              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between shadow-sm">
                 <div className="flex items-center gap-3">
-                  <Server size={18} className="text-blue-400" />
+                  <Server size={18} className="text-blue-600" />
                   <div>
-                    <div className="text-xs font-semibold text-white">MongoDB 云数据库集群</div>
-                    <div className="text-[11px] text-slate-400">Cluster0 (Atlas 分布式高可用)</div>
+                    <div className="text-xs font-semibold text-slate-900">MongoDB 云数据库集群</div>
+                    <div className="text-[11px] text-slate-500">Cluster0 (Atlas 分布式高可用)</div>
                   </div>
                 </div>
                 <div>
                   {dbStatus === 'connected' ? (
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold flex items-center gap-1 border border-emerald-500/30">
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1 border border-emerald-200 shadow-sm">
                       <CheckCircle2 size={12} /> 连接畅通
                     </span>
                   ) : dbStatus === 'disconnected' ? (
-                    <span className="px-2.5 py-1 rounded-full bg-red-500/20 text-red-300 text-xs font-bold flex items-center gap-1 border border-red-500/30">
+                    <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-800 text-xs font-bold flex items-center gap-1 border border-red-200 shadow-sm">
                       <AlertTriangle size={12} /> 未连接 / 离线
                     </span>
                   ) : (
-                    <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 text-xs flex items-center gap-1">
+                    <span className="px-2.5 py-1 rounded-full bg-slate-200 text-slate-700 text-xs flex items-center gap-1">
                       <RefreshCw size={12} className="animate-spin" /> 检测中
                     </span>
                   )}
@@ -1282,61 +1565,61 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
 
               {/* Status Item: Latency & Target Database */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                    <Activity size={12} className="text-amber-400" /> 自检响应延迟
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1 shadow-sm">
+                  <div className="text-[11px] text-slate-500 flex items-center gap-1">
+                    <Activity size={12} className="text-amber-600" /> 自检响应延迟
                   </div>
-                  <div className="text-sm font-bold font-mono text-emerald-400">
+                  <div className="text-sm font-bold font-mono text-emerald-700">
                     {dbDiagnostics?.latencyMs !== undefined ? `${dbDiagnostics.latencyMs} ms` : '计算中...'}
                   </div>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                    <Database size={12} className="text-blue-400" /> 当前数据库
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1 shadow-sm">
+                  <div className="text-[11px] text-slate-500 flex items-center gap-1">
+                    <Database size={12} className="text-blue-600" /> 当前数据库
                   </div>
-                  <div className="text-sm font-bold font-mono text-slate-200 truncate">
+                  <div className="text-sm font-bold font-mono text-slate-800 truncate">
                     {dbDiagnostics?.stats?.dbName || 'relay_platform'}
                   </div>
                 </div>
               </div>
 
               {/* Collections Stat Cards */}
-              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
-                <div className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 shadow-sm">
+                <div className="text-xs font-semibold text-slate-700 flex items-center justify-between">
                   <span>云数据库集合 (Collections) 数据统计</span>
                   <span className="text-[10px] text-slate-500 font-normal">多端实时同步</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center pt-1">
-                  <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <div className="text-base font-bold font-mono text-blue-400">
+                  <div className="p-2 rounded-lg bg-white border border-slate-200 shadow-sm">
+                    <div className="text-base font-bold font-mono text-blue-600">
                       {dbDiagnostics?.stats?.userCount ?? users.length}
                     </div>
-                    <div className="text-[10px] text-slate-400">注册用户数</div>
+                    <div className="text-[10px] text-slate-500">注册用户数</div>
                   </div>
-                  <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <div className="text-base font-bold font-mono text-purple-400">
+                  <div className="p-2 rounded-lg bg-white border border-slate-200 shadow-sm">
+                    <div className="text-base font-bold font-mono text-purple-600">
                       {dbDiagnostics?.stats?.codeCount ?? inviteCodes.length}
                     </div>
-                    <div className="text-[10px] text-slate-400">有效邀请码</div>
+                    <div className="text-[10px] text-slate-500">有效邀请码</div>
                   </div>
-                  <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
-                    <div className="text-base font-bold font-mono text-emerald-400">
+                  <div className="p-2 rounded-lg bg-white border border-slate-200 shadow-sm">
+                    <div className="text-base font-bold font-mono text-emerald-600">
                       {dbDiagnostics?.stats?.orderCount ?? orders.length}
                     </div>
-                    <div className="text-[10px] text-slate-400">购买订单记录</div>
+                    <div className="text-[10px] text-slate-500">购买订单记录</div>
                   </div>
                 </div>
               </div>
 
               {/* SMTP Mailer Status */}
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between shadow-sm">
                 <div className="text-xs">
-                  <span className="text-slate-400">验证码邮件服务 (SMTP 163): </span>
-                  <span className="text-slate-200 font-mono font-medium">
+                  <span className="text-slate-500">验证码邮件服务 (SMTP 163): </span>
+                  <span className="text-slate-900 font-mono font-medium">
                     {dbDiagnostics?.smtpUser || 'skot_catan@163.com'}
                   </span>
                 </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
                   {dbDiagnostics?.smtpConfigured ? '授权码已配置' : '默认配置'}
                 </span>
               </div>
@@ -1347,7 +1630,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
                 type="button"
                 onClick={checkDbHealth}
                 disabled={dbChecking}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-blue-300 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
               >
                 <RefreshCw size={12} className={dbChecking ? 'animate-spin' : ''} />
                 {dbChecking ? '正在自检...' : '立即重新自检'}
@@ -1356,7 +1639,7 @@ export default function AdminDashboard({ onClose, currentEmail }: AdminDashboard
               <button
                 type="button"
                 onClick={() => setShowDbModal(false)}
-                className="px-5 py-2 rounded-xl text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+                className="px-5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors cursor-pointer shadow-sm"
               >
                 关闭
               </button>

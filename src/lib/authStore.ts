@@ -240,6 +240,30 @@ export async function apiGetAdminUsers(): Promise<{ success: boolean; users?: Us
   }
 }
 
+export async function apiDeleteUser(identifier: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(identifier)}`, {
+      method: 'DELETE',
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: '删除用户网络请求失败' };
+  }
+}
+
+export async function apiBatchDeleteUsers(emails: string[]): Promise<{ success: boolean; message: string; deletedCount?: number }> {
+  try {
+    const res = await fetch('/api/admin/users/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emails }),
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: '批量删除用户网络请求失败' };
+  }
+}
+
 export async function apiGetAdmins(): Promise<{ success: boolean; admins?: any[]; message?: string }> {
   try {
     const res = await fetch('/api/admin/admins');
