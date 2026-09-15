@@ -8,9 +8,10 @@ import {
   Copy, 
   ArrowRight,
   ShieldCheck,
-  Zap
+  Zap,
+  Clock
 } from 'lucide-react';
-import { apiGetPaymentConfig } from '../lib/authStore';
+import { apiGetPaymentConfig, apiConfirmPurchase } from '../lib/authStore';
 
 interface PurchaseModalProps {
   isOpen: boolean;
@@ -46,13 +47,15 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
   const [copied, setCopied] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [hasAttemptedPayment, setHasAttemptedPayment] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
     if (isOpen) {
       setIssuedCode('');
       setErrorMsg('');
-      setHasAttemptedPayment(false);
       setLoading(false);
+      setHasAttemptedPayment(false);
+      setCountdown(0);
       
       // Fetch latest config in background, while cached config shows instantly
       apiGetPaymentConfig().then(res => {
@@ -66,29 +69,56 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
     }
   }, [isOpen]);
 
+  // Handle 5-second countdown timer for payment protection
+  useEffect(() => {
+    let timer: any = null;
+    if (countdown > 0) {
+      timer = setTimeout(() => {
+        setCountdown(prev => prev - 1);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [countdown]);
+
   const handleConfirmPay = async () => {
+    // 保护机制：首次点击触发订单查询拦截与5秒防刷防误触倒计时
     if (!hasAttemptedPayment) {
       setLoading(true);
       setErrorMsg('订单查询中...');
       
       setTimeout(() => {
         setLoading(false);
-        setErrorMsg('请先完成支付或5s后重试');
+        setErrorMsg('请先完成扫码支付，5秒后可确认出码');
         setHasAttemptedPayment(true);
+        setCountdown(5);
       }, 1000);
+      return;
+    }
+
+    if (countdown > 0) {
       return;
     }
 
     setLoading(true);
     setErrorMsg('');
     try {
-      // Simulate API call for issuing a code after successful payment verification
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const newCode = 'RP-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-88';
-      setIssuedCode(newCode);
-      onSuccess(newCode);
+      // Call backend API to record the order and generate a verifiable, persistent invite code
+      const res = await apiConfirmPurchase({
+        payMethod,
+        amount: config.price,
+        customerContact: '在线自主购买'
+      });
+
+      if (res.success && res.inviteCode) {
+        setIssuedCode(res.inviteCode);
+        onSuccess(res.inviteCode);
+      } else {
+        setErrorMsg(res.message || '出码失败，请稍后重试或联系客服');
+      }
     } catch (err) {
-      setErrorMsg('网络超时，请重试');
+      setErrorMsg('网络请求超时，请检查网络连接后重试');
     } finally {
       setLoading(false);
     }
@@ -227,11 +257,16 @@ export default function PurchaseModal({ isOpen, onClose, onSuccess }: PurchaseMo
                 <button
                   type="button"
                   onClick={handleConfirmPay}
-                  disabled={loading}
+                  disabled={loading || countdown > 0}
                   className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
                 >
                   {loading ? (
-                    !hasAttemptedPayment ? '正在查询...' : '正在确认收款并签发邀请码...'
+                    !hasAttemptedPayment ? '订单查询中...' : '正在确认收款并签发邀请码...'
+                  ) : countdown > 0 ? (
+                    <>
+                      <Clock size={16} className="animate-spin" />
+                      <span>正在校验支付状态 ({countdown}s)...</span>
+                    </>
                   ) : (
                     <>
                       <Zap size={16} />

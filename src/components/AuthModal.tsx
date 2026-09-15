@@ -635,7 +635,6 @@ export default function AuthModal({ onSuccess }: AuthModalProps) {
         onSuccess={(code) => {
           setInviteCode(code);
           setShowPurchaseModal(false);
-          setSuccessMsg(`已自动填入专属邀请码：${code}`);
         }}
       />
     </div>

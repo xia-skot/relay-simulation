@@ -295,17 +295,28 @@ app.post('/api/auth/register', async (req, res) => {
 
     // 2) Verify invite code (must exist and be unused)
     let codeDoc: ServerInviteCode | null = null;
+    const escapedCode = cleanInviteCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     try {
       const db = await getDb();
-      const found = await db.collection('invite_codes').findOne({ code: cleanInviteCode });
+      const found = await db.collection('invite_codes').findOne({ 
+        $or: [
+          { code: cleanInviteCode },
+          { code: { $regex: new RegExp(`^${escapedCode}$`, 'i') } }
+        ]
+      });
       if (found) {
         codeDoc = found as any;
       }
     } catch (err) {
-      // fallback
+      console.error('Mongo find invite code error:', err);
     }
-    if (!codeDoc && memoryInviteCodes.has(cleanInviteCode)) {
-      codeDoc = memoryInviteCodes.get(cleanInviteCode)!;
+    if (!codeDoc) {
+      for (const [key, val] of memoryInviteCodes.entries()) {
+        if (key.toUpperCase() === cleanInviteCode || val.code.toUpperCase() === cleanInviteCode) {
+          codeDoc = val;
+          break;
+        }
+      }
     }
 
     if (!codeDoc) {
@@ -345,7 +356,12 @@ app.post('/api/auth/register', async (req, res) => {
       await db.collection('users').insertOne(newUser);
       // Consume invite code
       await db.collection('invite_codes').updateOne(
-        { code: cleanInviteCode },
+        { 
+          $or: [
+            { code: cleanInviteCode },
+            { code: { $regex: new RegExp(`^${escapedCode}$`, 'i') } }
+          ]
+        },
         { $set: { status: 'used', usedBy: normalizedEmail, usedAt: new Date().toISOString() } }
       );
       // Clear verification code
@@ -353,11 +369,12 @@ app.post('/api/auth/register', async (req, res) => {
     } catch {
       memoryUsers.push(newUser);
       memoryCodes.delete(normalizedEmail);
-      if (memoryInviteCodes.has(cleanInviteCode)) {
-        const item = memoryInviteCodes.get(cleanInviteCode)!;
-        item.status = 'used';
-        item.usedBy = normalizedEmail;
-        item.usedAt = new Date().toISOString();
+      for (const [key, val] of memoryInviteCodes.entries()) {
+        if (key.toUpperCase() === cleanInviteCode || val.code.toUpperCase() === cleanInviteCode) {
+          val.status = 'used';
+          val.usedBy = normalizedEmail;
+          val.usedAt = new Date().toISOString();
+        }
       }
     }
 
